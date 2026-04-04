@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IT Operations AI Agent</title>
+    <!-- Chart.js for graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* CSS VARIABLES & RESET */
+        :root {
+            --primary-color: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg-color: #f3f4f6;
+            --sidebar-bg: #ffffff;
+            --text-main: #111827;
+            --text-secondary: #6b7280;
+            --border-color: #e5e7eb;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-main); height: 100vh; display: flex; overflow: hidden; }
+
+        /* --- LOGIN SCREEN --- */
+        #login-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #f3f4f6; z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .login-card {
+            background: white; padding: 2.5rem; border-radius: 12px;
+            box-shadow: var(--card-shadow); width: 100%; max-width: 400px;
+            text-align: center;
+        }
+        .login-card h2 { margin-bottom: 0.5rem; color: var(--text-main); font-size: 1.5rem; }
+        .login-card p { margin-bottom: 1.5rem; color: var(--text-secondary); font-size: 0.9rem; }
+
+        /* Auth Tabs */
+        .auth-tabs { display: flex; margin-bottom: 1.5rem; border-bottom: 2px solid #e5e7eb; }
+        .auth-tab { flex: 1; padding: 0.75rem 0; background: none; border: none; font-weight: 600; color: var(--text-secondary); cursor: pointer; transition: color 0.2s; }
+        .auth-tab:hover { color: var(--primary-color); }
+        .auth-tab.active { color: var(--primary-color); border-bottom: 2px solid var(--primary-color); margin-bottom: -2px; }
+        
+        .google-btn {
+            display: flex; align-items: center; justify-content: center;
+            width: 100%; padding: 10px 16px; border: 1px solid #dadce0;
+            border-radius: 4px; background: #fff; color: #3c4043;
+            font-family: 'Roboto', sans-serif; font-size: 14px; font-weight: 500;
+            cursor: pointer; margin-bottom: 1.5rem; transition: background 0.2s;
+        }
+        .google-btn:hover { background: #f7f8f8; }
+        .google-btn svg { width: 18px; height: 18px; margin-right: 12px; }
+        
+        .divider {
+            display: flex; align-items: center; text-align: center; margin-bottom: 1.5rem; color: #9ca3af; font-size: 0.8rem;
+        }
+        .divider::before, .divider::after { content: ''; flex: 1; border-bottom: 1px solid #e5e7eb; }
+        .divider::before { margin-right: .5em; }
+        .divider::after { margin-left: .5em; }
+
+        .login-input {
+            width: 100%; padding: 0.75rem; margin-bottom: 1rem;
+            border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.95rem;
+        }
+        .login-input:focus { outline: 2px solid var(--primary-color); border-color: transparent; }
+        
+        .login-btn {
+            width: 100%; padding: 0.75rem; background: var(--primary-color);
+            color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;
+            font-size: 1rem; transition: background 0.2s;
+        }
+        .login-btn:hover { background: var(--primary-hover); }
+
+        /* --- APP LAYOUT --- */
+        .sidebar {
+            width: 260px; background: var(--sidebar-bg); border-right: 1px solid var(--border-color);
+            display: flex; flex-direction: column; padding: 1.5rem 1rem; flex-shrink: 0;
+        }
+        .logo { font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 2rem; padding-left: 0.75rem; display: flex; align-items: center; gap: 10px; }
+        .logo-icon { width: 24px; height: 24px; background: var(--primary-color); border-radius: 6px; }
+        
+        .nav-menu { list-style: none; flex: 1; }
+        .nav-link {
+            display: flex; align-items: center; padding: 0.75rem 1rem; color: var(--text-secondary);
+            border-radius: 8px; font-weight: 500; cursor: pointer; margin-bottom: 0.5rem; transition: 0.2s;
+        }
+        .nav-link:hover { background-color: #f9fafb; color: var(--text-main); }
+        .nav-link.active { background-color: #e0e7ff; color: var(--primary-color); }
+        .nav-icon { margin-right: 12px; font-size: 1.1rem; }
+
+        .user-profile { padding-top: 1rem; border-top: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+        .user-info h4 { font-size: 0.875rem; font-weight: 600; }
+        .user-info p { font-size: 0.75rem; color: var(--text-secondary); }
+        .logout-btn { margin-left: auto; color: var(--text-secondary); cursor: pointer; background: none; border: none; font-size: 0.875rem; }
+
+        /* --- MAIN CONTENT --- */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        
+        .metrics-bar {
+            background: #fff; padding: 1.5rem 2rem; display: grid;
+            grid-template-columns: repeat(4, 1fr); gap: 1.5rem; border-bottom: 1px solid var(--border-color);
+        }
+        .metric-card { display: flex; flex-direction: column; }
+        .metric-label { font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 0.25rem; }
+        .metric-value { font-size: 1.5rem; font-weight: 700; color: var(--text-main); }
+
+        .scroll-area { flex: 1; overflow-y: auto; padding: 2rem; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        .page-header { margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+        .page-title { font-size: 1.5rem; font-weight: 700; }
+
+        .card { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: var(--card-shadow); border: 1px solid var(--border-color); margin-bottom: 1.5rem; }
+        .dashboard-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; }
+        .chart-container { position: relative; height: 300px; width: 100%; }
+
+        /* --- AGENT PROMPT STYLES --- */
+        .agent-prompt-box {
+            position: relative;
+        }
+        .agent-textarea {
+            width: 100%; min-height: 150px; padding: 1.5rem;
+            border: 2px solid var(--border-color); border-radius: 12px; font-size: 1.1rem;
+            resize: vertical; outline: none; transition: border-color 0.3s; line-height: 1.6;
+        }
+        .agent-textarea:focus { border-color: var(--primary-color); }
+        .agent-hint {
+            position: absolute; bottom: 1rem; right: 1rem; color: var(--text-secondary); font-size: 0.8rem;
+            pointer-events: none;
+        }
+        .agent-submit-btn {
+            margin-top: 1rem; width: 100%; padding: 1rem;
+            background: var(--primary-color); color: white; border: none; border-radius: 8px;
+            font-size: 1rem; font-weight: 600; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+        }
+        .agent-submit-btn:hover { background: var(--primary-hover); }
+
+        .btn { padding: 0.6rem 1.2rem; border-radius: 6px; border: none; font-weight: 500; cursor: pointer; transition: 0.2s; }
+        .btn-primary { background: var(--primary-color); color: white; }
+        
+        .table-container { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; white-space: nowrap; }
+        th { text-align: left; padding: 0.75rem; background: #f9fafb; color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border-color); }
+        td { padding: 0.75rem; border-bottom: 1px solid var(--border-color); }
+        tr:hover td { background-color: #f9fafb; }
+
+        .badge { padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; }
+        .badge-Critical { background: #fee2e2; color: #991b1b; }
+        .badge-High { background: #ffedd5; color: #9a3412; }
+        .badge-Medium { background: #fef3c7; color: #92400e; }
+        .badge-Low { background: #d1fae5; color: #065f46; }
+        .badge-P1 { background: #3730a3; color: white; }
+        .badge-P2 { background: #4338ca; color: white; }
+        .badge-P3 { background: #6366f1; color: white; }
+        .badge-P4 { background: #a5b4fc; color: white; }
+        .badge-P5 { background: #e0e7ff; color: #4338ca; }
+
+        /* --- RESOLUTION STYLES --- */
+        #analyzing-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9); z-index: 2000;
+            flex-direction: column; justify-content: center; align-items: center;
+        }
+        .loader {
+            width: 48px; height: 48px; border: 5px solid #e0e7ff;
+            border-bottom-color: var(--primary-color); border-radius: 50%;
+            animation: rotation 1s linear infinite; margin-bottom: 1rem;
+        }
+        @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .analyzing-text { font-size: 1.2rem; color: var(--text-main); font-weight: 600; }
+        .sub-text { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem; }
+
+        #resolution-report {
+            display: none; animation: slideUp 0.5s ease; margin-top: 2rem;
+            border: 1px solid #bfdbfe; background: #eff6ff;
+        }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .res-header { border-bottom: 1px solid #dbeafe; padding-bottom: 1rem; margin-bottom: 1rem; }
+        .res-title { color: #1e40af; font-size: 1.2rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+        .res-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        .res-box h4 { color: #1e3a8a; margin-bottom: 0.5rem; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .res-steps { list-style: none; counter-reset: step-counter; }
+        .res-steps li { position: relative; padding-left: 2rem; margin-bottom: 0.75rem; color: #334155; line-height: 1.5; }
+        .res-steps li::before {
+            counter-increment: step-counter; content: counter(step-counter);
+            position: absolute; left: 0; top: 2px; width: 24px; height: 24px;
+            background: var(--primary-color); color: white; border-radius: 50%;
+            font-size: 0.75rem; font-weight: bold; display: flex; align-items: center; justify-content: center;
+        }
+
+        /* Inference Badges in Resolution */
+        .inference-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+        .inference-badge { background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+
+        .ai-summary-box { background: #f8fafc; border-left: 4px solid var(--primary-color); padding: 1rem; margin-bottom: 1rem; }
+        .ai-summary-title { font-weight: 700; color: var(--primary-color); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 8px; }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 2rem; right: 2rem; background: #fff; padding: 1rem 1.5rem;
+            border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid var(--success-color); display: flex; align-items: center; gap: 12px;
+            transform: translateY(100px); opacity: 0; transition: all 0.3s; z-index: 1000;
+        }
+        .toast.show { transform: translateY(0); opacity: 1; }
+
+        @media (max-width: 768px) {
+            .sidebar { position: absolute; left: -260px; height: 100%; z-index: 50; }
+            .metrics-bar { grid-template-columns: 1fr 1fr; }
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .res-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- LOGIN SCREEN -->
+    <div id="login-screen">
+        <div class="login-card">
+            <div style="margin-bottom: 1rem;">
+                <div class="logo-icon" style="width: 50px; height: 50px; margin: 0 auto; border-radius: 12px;"></div>
+            </div>
+            
+            <div class="auth-tabs">
+                <button id="tab-login" class="auth-tab active" onclick="toggleAuthMode('login')">Sign In</button>
+                <button id="tab-signup" class="auth-tab" onclick="toggleAuthMode('signup')">Sign Up</button>
+            </div>
+
+            <h2 id="auth-title">Welcome Back</h2>
+            <p id="auth-subtitle">Access your IT Dashboard</p>
+
+            <button id="google-btn" class="google-btn" onclick="handleGoogleAuth()">
+                <svg viewBox="0 0 48 48">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                </svg>
+                <span id="google-btn-text">Sign in with Google</span>
+            </button>
+
+            <div class="divider">OR</div>
+
+            <form onsubmit="handleEmailAuth(event)">
+                <div id="name-group" style="display:none;">
+                    <input type="text" id="name" class="login-input" placeholder="Full Name">
+                </div>
+                <input type="email" id="email" class="login-input" placeholder="Email Address" required>
+                <input type="password" id="password" class="login-input" placeholder="Password" required>
+                <button type="submit" class="login-btn" id="email-btn">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN APP -->
+    <nav class="sidebar" id="app-sidebar" style="display:none;">
+        <div class="logo">
+            <div class="logo-icon"></div>
+            <span>OpsManager</span>
+        </div>
+        <ul class="nav-menu">
+            <li class="nav-item"><a class="nav-link active" onclick="switchPage('dashboard', this)"><span class="nav-icon">📊</span> Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link" onclick="switchPage('log-incident', this)"><span class="nav-icon">🚨</span> Operations</a></li>
+            <li class="nav-item"><a class="nav-link" onclick="switchPage('history', this)"><span class="nav-icon">🗃️</span> Data History</a></li>
+            <li class="nav-item"><a class="nav-link" onclick="switchPage('ai-summaries', this)"><span class="nav-icon">🤖</span> AI Summaries</a></li>
+            <li class="nav-item"><a class="nav-link" onclick="switchPage('reports', this)"><span class="nav-icon">📑</span> Stored Reports</a></li>
+        </ul>
+        <div class="user-profile">
+            <img src="https://picsum.photos/seed/user/40/40" class="avatar" id="user-avatar">
+            <div class="user-info">
+                <h4 id="user-name">Pat Manager</h4>
+                <p id="user-role">MANAGER</p>
+            </div>
+            <button class="logout-btn" onclick="handleLogout()">Sign out</button>
+        </div>
+    </nav>
+
+    <main class="main-content" id="app-main" style="display:none;">
+        <!-- Top Metrics -->
+        <div class="metrics-bar">
+            <div class="metric-card"><span class="metric-label">Total Incidents</span><span class="metric-value" id="metric-total">0</span></div>
+            <div class="metric-card"><span class="metric-label">Critical (P1)</span><span class="metric-value" id="metric-p1" style="color: var(--danger-color);">0</span></div>
+            <div class="metric-card"><span class="metric-label">Breached SLA</span><span class="metric-value" id="metric-breach" style="color: var(--warning-color);">0</span></div>
+            <div class="metric-card"><span class="metric-label">Avg. Resolution</span><span class="metric-value" id="metric-avg">0m</span></div>
+        </div>
+
+        <div class="scroll-area">
+            <div class="container">
+                
+                <!-- DASHBOARD -->
+                <section id="page-dashboard">
+                    <div class="page-header">
+                        <h2 class="page-title">Dashboard</h2>
+                        <span id="date-display" style="color: var(--text-secondary);"></span>
+                    </div>
+                    <div class="dashboard-grid">
+                        <div class="card">
+                            <div class="page-title" style="font-size: 1.1rem; margin-bottom: 1rem;">Incident Volume (Last 7 Days)</div>
+                            <div class="chart-container"><canvas id="trendChart"></canvas></div>
+                        </div>
+                        <div class="card">
+                            <div class="page-title" style="font-size: 1.1rem; margin-bottom: 1rem;">Priority Breakdown</div>
+                            <div class="chart-container"><canvas id="priorityChart"></canvas></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- LOG INCIDENT (Agent Mode) -->
+                <section id="page-log-incident" style="display:none;">
+                    <div class="page-header"><h2 class="page-title">AI Operations Agent</h2></div>
+                    
+                    <!-- Analysis Overlay -->
+                    <div id="analyzing-overlay">
+                        <div class="loader"></div>
+                        <div class="analyzing-text" id="analysis-text">Analyzing Query...</div>
+                        <div class="sub-text" id="analysis-sub">Extracting entities and context</div>
+                    </div>
+
+                    <div class="card">
+                        <div class="agent-prompt-box">
+                            <textarea id="ai-prompt" class="agent-textarea" placeholder="Describe the incident here... (e.g., 'The payment server is down globally, users are getting 500 errors')"></textarea>
+                            <div class="agent-hint">Press Enter to add a new line</div>
+                        </div>
+                        <button class="agent-submit-btn" onclick="handleAgentSubmit()">
+                            <span>Analyze & Resolve</span>
+                            <span style="font-size:1.2rem">⚡</span>
+                        </button>
+
+                        <!-- RESOLUTION REPORT -->
+                        <div id="resolution-report" class="card">
+                            <div class="res-header">
+                                <div class="res-title">✨ Agent Analysis Complete</div>
+                                <div style="margin-top: 10px;">
+                                    <div class="inference-row">
+                                        <span class="inference-badge" id="res-badge-prio">Priority: P3</span>
+                                        <span class="inference-badge" id="res-badge-sys">System: Unknown</span>
+                                        <span class="inference-badge" id="res-badge-scope">Scope: Unknown</span>
+                                    </div>
+                                    <div style="font-size:0.9rem; color:#1e40af; margin-top:5px;">
+                                        Estimated Time: <strong id="res-time">0m</strong> | Severity: <strong id="res-severity">Low</strong>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="res-grid">
+                                <div class="res-box">
+                                    <h4>Identified Root Cause</h4>
+                                    <p id="res-cause" style="color: #475569; font-style: italic;">Waiting for analysis...</p>
+                                </div>
+                                <div class="res-box">
+                                    <h4>Recommended Resolution Steps</h4>
+                                    <ul class="res-steps" id="res-steps-list"></ul>
+                                </div>
+                            </div>
+                            <div style="margin-top: 1rem; padding-top:1rem; border-top:1px dashed #bfdbfe; font-size:0.8rem; color:#64748b; text-align:center;">
+                                This incident has been automatically added to the Training Knowledge Base (INC<span id="new-id"></span>).
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- DATA HISTORY -->
+                <section id="page-history" style="display:none;">
+                    <div class="page-header"><h2 class="page-title">Full Dataset (Knowledge Base)</h2>
+                        <input type="text" class="form-input" placeholder="Search by ID, Title or System..." style="width: 250px; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px;" onkeyup="filterTable(this.value)">
+                    </div>
+                    <div class="card" style="padding:0; overflow:hidden;">
+                        <div class="table-container">
+                            <table id="fullTable">
+                                <thead><tr><th>ID</th><th>Description</th><th>System</th><th>Scope</th><th>Priority</th><th>Severity</th><th>Time (m)</th><th>Timestamp</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- AI SUMMARIES -->
+                <section id="page-ai-summaries" style="display:none;">
+                    <div class="page-header"><h2 class="page-title">AI Generated Insights</h2></div>
+                    <div id="ai-content"></div>
+                </section>
+
+                <!-- STORED REPORTS -->
+                <section id="page-reports" style="display:none;">
+                    <div class="page-header"><h2 class="page-title">Stored Reports</h2></div>
+                    <div class="dashboard-grid">
+                        <div class="card">
+                            <h3 style="margin-bottom: 1rem;">Incidents by Affected System</h3>
+                            <div class="chart-container"><canvas id="reportSystemChart"></canvas></div>
+                        </div>
+                        <div class="card">
+                            <h3 style="margin-bottom: 1rem;">Severity vs Priority</h3>
+                            <div class="chart-container"><canvas id="reportSevChart"></canvas></div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+    </main>
+
+    <div id="toast" class="toast"><span class="toast-icon">✓</span><span class="toast-message">Action Successful</span></div>
+
+    <script>
+        // --- 1. STATE & DATA ---
+        let incidents = [];
+        
+        function generateMockData() {
+            const systems = ["Auth Service", "Payment Gateway", "User Database", "Frontend UI", "Inventory API", "Email Server"];
+            const priorities = ["P1", "P2", "P3", "P4", "P5"];
+            const sampleLogs = ["NullPointerException at line 402", "Connection timeout", "500 Internal Server Error", "Latency > 2000ms", "OOM Killer triggered"];
+            
+            for (let i = 1; i <= 50; i++) {
+                const priority = priorities[Math.floor(Math.random() * priorities.length)];
+                let severity = "Low";
+                if(priority === "P1") severity = "Critical";
+                else if(priority === "P2") severity = "High";
+                else if(priority === "P3") severity = "Medium";
+
+                incidents.push({
+                    incidentid: 1000 + i,
+                    title: `Incident #${i} - ${systems[Math.floor(Math.random() * systems.length)]} Failure`,
+                    description: "Automated generated issue.",
+                    affected_system: systems[Math.floor(Math.random() * systems.length)],
+                    impacted_scope: "Global",
+                    reported_priority: priority,
+                    severity_prediction: severity,
+                    time_estimate: Math.floor(Math.random() * 120) + 10,
+                    sla_deadline: 60,
+                    error_logs: sampleLogs[Math.floor(Math.random() * sampleLogs.length)],
+                    timestamp: new Date(Date.now() - Math.floor(Math.random() * 1000000000)).toISOString()
+                });
+            }
+        }
+
+        // --- 2. AUTHENTICATION ---
+        let authMode = 'login';
+        function toggleAuthMode(mode) {
+            authMode = mode;
+            const title = document.getElementById('auth-title');
+            const subtitle = document.getElementById('auth-subtitle');
+            const btn = document.getElementById('email-btn');
+            const googleText = document.getElementById('google-btn-text');
+            const nameGroup = document.getElementById('name-group');
+            const tabLogin = document.getElementById('tab-login');
+            const tabSignup = document.getElementById('tab-signup');
+
+            if (mode === 'signup') {
+                title.innerText = "Create Account"; subtitle.innerText = "Join OpsManager today";
+                btn.innerText = "Sign Up"; googleText.innerText = "Sign up with Google";
+                nameGroup.style.display = "block"; tabLogin.classList.remove('active'); tabSignup.classList.add('active');
+            } else {
+                title.innerText = "Welcome Back"; subtitle.innerText = "Access your IT Dashboard";
+                btn.innerText = "Sign In"; googleText.innerText = "Sign in with Google";
+                nameGroup.style.display = "none"; tabLogin.classList.add('active'); tabSignup.classList.remove('active');
+            }
+        }
+        function handleGoogleAuth() {
+            const btn = document.querySelector('.google-btn');
+            const originalText = document.getElementById('google-btn-text').innerText;
+            btn.innerHTML = 'Connecting...'; btn.style.opacity = '0.7';
+            setTimeout(() => {
+                let name = "Google User"; if(authMode === 'signup') name = document.getElementById('name').value || "New User";
+                enterApp(name, "Admin");
+                btn.innerHTML = `<svg viewBox="0 0 48 48" style="width:18px; height:18px; margin-right:12px;"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path></svg> ${originalText}`;
+                btn.style.opacity = '1';
+            }, 1500);
+        }
+        function handleEmailAuth(e) {
+            e.preventDefault(); const btn = document.getElementById('email-btn'); const email = document.getElementById('email').value;
+            const pass = document.getElementById('password').value; const name = document.getElementById('name').value;
+            btn.innerText = "Processing..."; btn.disabled = true;
+            setTimeout(() => {
+                let displayName = "Pat Manager"; let role = "MANAGER";
+                if (authMode === 'signup') {
+                    if(!email || !pass) { alert("Please fill all fields"); btn.disabled = false; btn.innerText = "Sign Up"; return; }
+                    displayName = name || "New User"; role = "NEW USER"; showToast("Account created successfully!");
+                } else { if (email === 'admin@ops.com' && pass === 'admin') { displayName = "Pat Manager"; } else { displayName = email.split('@')[0]; role = "USER"; } }
+                enterApp(displayName, role); btn.disabled = false; btn.innerText = authMode === 'signup' ? "Sign Up" : "Sign In";
+            }, 1000);
+        }
+        function enterApp(name, role) {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('app-sidebar').style.display = 'flex';
+            document.getElementById('app-main').style.display = 'flex';
+            document.getElementById('user-name').innerText = name; document.getElementById('user-role').innerText = role;
+            initApp();
+        }
+        function handleLogout() {
+            document.getElementById('app-sidebar').style.display = 'none';
+            document.getElementById('app-main').style.display = 'none';
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('email-btn').innerText = "Sign In";
+            document.getElementById('email-btn').disabled = false;
+            document.getElementById('email').value = ""; document.getElementById('password').value = "";
+        }
+
+        // --- 3. APP INITIALIZATION ---
+        function initApp() {
+            if (incidents.length === 0) generateMockData();
+            switchPage('dashboard', document.querySelector('.nav-link.active'));
+            document.getElementById('date-display').innerText = new Date().toISOString().split('T')[0];
+        }
+        function switchPage(pageId, el) {
+            document.querySelectorAll('section').forEach(s => s.style.display = 'none');
+            document.getElementById('page-' + pageId).style.display = 'block';
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            el.classList.add('active');
+            if(pageId === 'dashboard') updateDashboard();
+            if(pageId === 'history') renderFullTable(incidents);
+            if(pageId === 'ai-summaries') generateAISummaries();
+            if(pageId === 'reports') updateReports();
+        }
+
+        // --- 4. AGENT INFERENCE & ANALYSIS LOGIC ---
+        function handleAgentSubmit() {
+            const prompt = document.getElementById('ai-prompt').value;
+            if(!prompt) { alert("Please describe the incident."); return; }
+
+            const overlay = document.getElementById('analyzing-overlay');
+            const textEl = document.getElementById('analysis-text');
+            const subEl = document.getElementById('analysis-sub');
+            
+            overlay.style.display = 'flex';
+            document.getElementById('resolution-report').style.display = 'none';
+
+            // Simulate Thinking Steps
+            setTimeout(() => { textEl.innerText = "Extracting Entities..."; subEl.innerText = "Detecting System, Priority, Scope"; }, 800);
+            setTimeout(() => { textEl.innerText = "Correlating with Knowledge Base..."; subEl.innerText = "Searching for similar patterns"; }, 1800);
+            setTimeout(() => { textEl.innerText = "Generating Resolution Plan..."; subEl.innerText = "Calculating estimated time"; }, 2600);
+
+            setTimeout(() => {
+                // --- AGENT INFERENCE ENGINE ---
+                const text = prompt.toLowerCase();
+                let priority = "P3"; let system = "General Application"; let scope = "Internal";
+                let severity = "Medium"; let estTime = 30; let sla = 60;
+                let rootCause = "General application error.";
+                let steps = ["Check application logs.", "Verify server health.", "Restart affected service."];
+
+                // Priority Inference
+                if(text.includes('critical') || text.includes('down') || text.includes('crash') || text.includes('fatal')) { priority = "P1"; severity = "Critical"; sla = 15; estTime = 90; }
+                else if(text.includes('high') || text.includes('urgent') || text.includes('major')) { priority = "P2"; severity = "High"; sla = 60; estTime = 60; }
+                else if(text.includes('slow') || text.includes('latency') || text.includes('lag')) { priority = "P2"; severity = "High"; estTime = 45; }
+                else if(text.includes('minor') || text.includes('cosmetic')) { priority = "P5"; severity = "Low"; sla = 1000; estTime = 10; }
+                else { priority = "P3"; sla = 120; } // Default
+
+                // System Inference
+                if(text.includes('payment') || text.includes('checkout') || text.includes('stripe')) system = "Payment Gateway";
+                else if(text.includes('login') || text.includes('auth') || text.includes('password') || text.includes('sso')) system = "Auth Service";
+                else if(text.includes('database') || text.includes('db') || text.includes('sql') || text.includes('query')) system = "User Database";
+                else if(text.includes('ui') || text.includes('frontend') || text.includes('button') || text.includes('page')) system = "Frontend UI";
+                else if(text.includes('email') || text.includes('notification') || text.includes('mail')) system = "Email Server";
+                else if(text.includes('server') || text.includes('host') || text.includes('instance')) system = "Infrastructure";
+
+                // Scope Inference
+                if(text.includes('global') || text.includes('worldwide') || text.includes('everyone')) scope = "Global";
+                else if(text.includes('region') || text.includes('eu') || text.includes('us') || text.includes('asia')) scope = "Regional";
+                else if(text.includes('my') || text.includes('account') || text.includes('single')) scope = "Specific User";
+                else scope = "Internal";
+
+                // Resolution Logic based on Inferred Data
+                if(priority === "P1" || text.includes('down')) {
+                    rootCause = `Service termination detected in ${system}.`;
+                    steps = [`SSH into ${system} production instances.`, "Check system resources (CPU/Memory) for OOM.", "Review recent error logs for stack traces.", `Attempt service restart: systemctl restart ${system.toLowerCase().replace(' ','-')}.`, "If unresolved, initiate rollback procedure."];
+                } else if (text.includes('slow') || text.includes('latency')) {
+                    rootCause = `Performance bottleneck detected in ${system}.`;
+                    steps = [`Enable slow query log on ${system}.`, "Analyze execution plan for unindexed queries.", "Check cache hit rates (Redis/Memcached).", "Restart caching layer if hit rate < 90%.", "Apply recommended database indexes."];
+                } else if (system === "Auth Service") {
+                    rootCause = "Authentication token validation failure.";
+                    steps = ["Verify SSO Provider (Okta/Auth0) status.", "Check JWT expiration settings.", "Restart Identity Provider sync service.", "Clear local cookies and re-authenticate."];
+                }
+
+                // --- SAVE & UPDATE UI ---
+                const newRecord = {
+                    incidentid: 1000 + incidents.length + 1, 
+                    title: prompt.substring(0, 50) + "...", 
+                    description: prompt, 
+                    affected_system: system,
+                    impacted_scope: scope, 
+                    reported_priority: priority, 
+                    severity_prediction: severity,
+                    time_estimate: estTime, 
+                    sla_deadline: sla, 
+                    error_logs: "Analyzed from prompt", 
+                    timestamp: new Date().toISOString()
+                };
+                incidents.push(newRecord);
+
+                overlay.style.display = 'none';
+                document.getElementById('resolution-report').style.display = 'block';
+                
+                // Update Badge UI
+                document.getElementById('res-badge-prio').innerText = `Priority: ${priority}`;
+                document.getElementById('res-badge-sys').innerText = `System: ${system}`;
+                document.getElementById('res-badge-scope').innerText = `Scope: ${scope}`;
+                
+                document.getElementById('res-time').innerText = estTime + " mins";
+                document.getElementById('res-severity').innerText = severity;
+                document.getElementById('res-cause').innerText = rootCause;
+                document.getElementById('new-id').innerText = newRecord.incidentid;
+
+                const stepsList = document.getElementById('res-steps-list');
+                stepsList.innerHTML = '';
+                steps.forEach(step => {
+                    const li = document.createElement('li'); li.innerText = step; stepsList.appendChild(li);
+                });
+                showToast("Agent Analysis Complete.");
+            }, 3200);
+        }
+
+        // --- 5. DASHBOARD & TABLES ---
+        let charts = {};
+        function updateDashboard() {
+            document.getElementById('metric-total').innerText = incidents.length;
+            document.getElementById('metric-p1').innerText = incidents.filter(i => i.reported_priority === 'P1').length;
+            document.getElementById('metric-breach').innerText = incidents.filter(i => i.time_estimate > i.sla_deadline).length;
+            const avgTime = Math.round(incidents.reduce((a,b) => a + b.time_estimate, 0) / incidents.length);
+            document.getElementById('metric-avg').innerText = avgTime + "m";
+
+            const ctxTrend = document.getElementById('trendChart').getContext('2d');
+            if(charts.trend) charts.trend.destroy();
+            charts.trend = new Chart(ctxTrend, {
+                type: 'line', data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [{ label: 'Incidents', data: [5, 12, 8, 15, 6, 4, incidents.length % 20], borderColor: '#6366f1', tension: 0.4, fill: true, backgroundColor: 'rgba(99, 102, 241, 0.1)' }] }, options: { responsive: true, maintainAspectRatio: false }
+            });
+
+            const pCounts = {}; incidents.forEach(i => pCounts[i.reported_priority] = (pCounts[i.reported_priority] || 0) + 1);
+            const ctxPrio = document.getElementById('priorityChart').getContext('2d');
+            if(charts.prio) charts.prio.destroy();
+            charts.prio = new Chart(ctxPrio, {
+                type: 'bar', data: { labels: Object.keys(pCounts), datasets: [{ label: 'Count', data: Object.values(pCounts), backgroundColor: '#6366f1' }] }, options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+
+        function renderFullTable(data) {
+            const tbody = document.querySelector('#fullTable tbody'); tbody.innerHTML = '';
+            data.slice().reverse().slice(0, 50).forEach(i => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>INC${i.incidentid}</td><td title="${i.description}">${i.title}</td><td>${i.affected_system}</td><td>${i.impacted_scope}</td><td><span class="badge badge-${i.reported_priority}">${i.reported_priority}</span></td><td><span class="badge badge-${i.severity_prediction}">${i.severity_prediction}</span></td><td>${i.time_estimate}</td><td>${i.timestamp.split('T')[0]}</td>`;
+                tbody.appendChild(tr);
+            });
+        }
+        function filterTable(query) {
+            const lower = query.toLowerCase();
+            const filtered = incidents.filter(i => i.title.toLowerCase().includes(lower) || i.affected_system.toLowerCase().includes(lower));
+            renderFullTable(filtered);
+        }
+        function generateAISummaries() {
+            const container = document.getElementById('ai-content');
+            const total = incidents.length;
+            const criticals = incidents.filter(i => i.severity_prediction === 'Critical').length;
+            const topSystem = incidents.sort((a,b) => incidents.filter(v => v.affected_system === b.affected_system).length - incidents.filter(v => v.affected_system === a.affected_system).length)[0]?.affected_system || "Unknown";
+            container.innerHTML = `<div class="ai-summary-box"><div class="ai-summary-title">🤖 Operational Health</div><p>Total Incidents: <strong>${total}</strong>. Critical: <strong>${criticals}</strong>. Top System: <strong>${topSystem}</strong>.</p></div>`;
+        }
+
+        function updateReports() {
+            const sysCounts = {}; incidents.forEach(i => sysCounts[i.affected_system] = (sysCounts[i.affected_system] || 0) + 1);
+            const ctxSys = document.getElementById('reportSystemChart').getContext('2d');
+            if(charts.sys) charts.sys.destroy();
+            charts.sys = new Chart(ctxSys, { 
+                type: 'doughnut', data: { labels: Object.keys(sysCounts), datasets: [{ data: Object.values(sysCounts), backgroundColor: ['#6366f1', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#818cf8'] }] }, options: { responsive: true, maintainAspectRatio: false } 
+            });
+            const sevCounts = { "Critical": 0, "High": 0, "Medium": 0, "Low": 0 };
+            incidents.forEach(i => sevCounts[i.severity_prediction]++);
+            const ctxSev = document.getElementById('reportSevChart').getContext('2d');
+            if(charts.sev) charts.sev.destroy();
+            charts.sev = new Chart(ctxSev, { 
+                type: 'pie', data: { labels: Object.keys(sevCounts), datasets: [{ data: Object.values(sevCounts), backgroundColor: ['#ef4444', '#f97316', '#f59e0b', '#10b981'] }] }, options: { responsive: true, maintainAspectRatio: false } 
+            });
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.querySelector('.toast-message').innerText = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 3000);
+        }
+    </script>
+</body>
+</html>
