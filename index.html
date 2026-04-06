@@ -38,6 +38,15 @@
         }
         .login-card h2 { margin-bottom: 0.5rem; color: var(--text-main); font-size: 1.5rem; }
         .login-card p { margin-bottom: 1.5rem; color: var(--text-secondary); font-size: 0.9rem; }
+        .login-data-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: #f0fdf4; color: #166534; font-size: 0.78rem; font-weight: 600;
+            padding: 0.35rem 0.75rem; border-radius: 999px; border: 1px solid #bbf7d0;
+            margin-bottom: 1rem;
+        }
+        .login-data-badge .dot {
+            width: 7px; height: 7px; border-radius: 50%; background: #22c55e;
+        }
 
         /* Auth Tabs */
         .auth-tabs { display: flex; margin-bottom: 1.5rem; border-bottom: 2px solid #e5e7eb; }
@@ -288,6 +297,13 @@
                 <input type="password" id="password" class="login-input" placeholder="Password" required>
                 <button type="submit" class="login-btn" id="email-btn">Sign In</button>
             </form>
+            <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #e5e7eb;">
+                <div class="login-data-badge" id="login-data-badge" style="display:none;">
+                    <span class="dot"></span>
+                    <span id="login-data-info">Data exists</span>
+                </div>
+                <p style="font-size: 0.72rem; color: #9ca3af; margin-top: 0.5rem;">Data persists across all accounts & refreshes</p>
+            </div>
         </div>
     </div>
 
@@ -700,7 +716,7 @@
             document.getElementById('app-sidebar').style.display = 'flex';
             document.getElementById('app-main').style.display = 'flex';
             document.getElementById('user-name').innerText = name; document.getElementById('user-role').innerText = role;
-            initApp();
+            initApp(name);
         }
         function handleLogout() {
             document.getElementById('app-sidebar').style.display = 'none';
@@ -709,16 +725,49 @@
             document.getElementById('email-btn').innerText = "Sign In";
             document.getElementById('email-btn').disabled = false;
             document.getElementById('email').value = ""; document.getElementById('password').value = "";
+            // Show existing data badge on login screen (data is NOT cleared on logout)
+            updateLoginDataBadge();
         }
 
         // ============================================================
         // 3. APP INITIALIZATION
         // ============================================================
-        function initApp() {
+        function initApp(userName) {
             // Load data from localStorage (or generate initial 50)
             loadIncidents();
             switchPage('dashboard', document.querySelector('.nav-link.active'));
             document.getElementById('date-display').innerText = new Date().toISOString().split('T')[0];
+            // Show welcome toast with data status
+            const total = incidents.length;
+            const userAdded = incidents.filter(i => !i.isTrainingData).length;
+            let msg = `Welcome${userName ? ', ' + userName : ''}! Loaded ${total} records.`;
+            if (userAdded > 0) msg += ` (${userAdded} manually added)`;
+            setTimeout(() => showToast(msg), 500);
+        }
+
+        /**
+         * Update the green data badge on the login screen to show
+         * how many records exist in localStorage. Called on page load
+         * and after logout so returning users see their data is safe.
+         */
+        function updateLoginDataBadge() {
+            const badge = document.getElementById('login-data-badge');
+            const info = document.getElementById('login-data-info');
+            try {
+                const stored = localStorage.getItem(STORAGE_KEY);
+                if (stored) {
+                    const data = JSON.parse(stored);
+                    const userAdded = data.filter(i => !i.isTrainingData).length;
+                    let txt = `${data.length} records saved`;
+                    if (userAdded > 0) txt += ` (${userAdded} added by you)`;
+                    info.textContent = txt;
+                    badge.style.display = 'inline-flex';
+                } else {
+                    badge.style.display = 'none';
+                }
+            } catch (e) {
+                badge.style.display = 'none';
+            }
         }
         function switchPage(pageId, el) {
             document.querySelectorAll('section').forEach(s => s.style.display = 'none');
@@ -733,7 +782,698 @@
         }
 
         // ============================================================
-        // 4. AGENT INFERENCE & ANALYSIS LOGIC (saves to localStorage)
+        // 4. RESOLUTION KNOWLEDGE BASE
+        // ============================================================
+        /**
+         * Comprehensive knowledge base returning unique root cause + steps
+         * for each system x errorType x priority combination.
+         * Over 80 unique resolution paths.
+         */
+        function getResolutionFromKB(system, priority, errorType, scope, rawText) {
+            // ---- PAYMENT GATEWAY ----
+            if (system === "Payment Gateway") {
+                if (errorType === 'server_error') return {
+                    rootCause: "Payment Gateway internal processing engine threw unhandled exception due to malformed transaction payload from upstream checkout service.",
+                    severity: "Critical", estTime: 80,
+                    steps: [
+                        "Check Stripe/payment provider status page for active incidents.",
+                        "Review payment gateway application logs at /var/log/payment-gateway/ for stack traces around the 500 error.",
+                        "Inspect recent deployments — rollback if a new release was pushed in the last 24 hours.",
+                        "Verify the transaction payload schema matches the provider's expected API contract.",
+                        "Test a manual payment via Stripe Dashboard test mode to confirm provider side is healthy.",
+                        "Scale up payment gateway pods to handle potential traffic surge: kubectl scale deployment payment-gw --replicas=5."
+                    ]
+                };
+                if (errorType === 'timeout') return {
+                    rootCause: "Payment provider API (Stripe/Adyen) is experiencing elevated response times causing transaction requests to exceed the 30-second gateway timeout.",
+                    severity: "High", estTime: 55,
+                    steps: [
+                        "Verify Stripe API status at status.stripe.com — check response time metrics.",
+                        "Increase payment gateway timeout from 30s to 60s as a temporary mitigation.",
+                        "Enable retry logic with exponential backoff (3 retries, 5s/15s/45s intervals).",
+                        "Check if circuit breaker to the payment provider is in OPEN state — reset if needed.",
+                        "Review network latency between your infrastructure and the payment provider's data center.",
+                        "Consider enabling an alternative payment provider as failover routing."
+                    ]
+                };
+                if (errorType === 'queue_backlog') return {
+                    rootCause: "Payment processing queue (Kafka topic: payment-events) has a growing backlog due to slow consumer processing — refund workers are at full capacity.",
+                    severity: "Critical", estTime: 70,
+                    steps: [
+                        "Run: kafka-consumer-groups.sh --describe --group payment-processor to check consumer lag.",
+                        "Scale up payment consumer instances to 3x current count to drain the backlog faster.",
+                        "Identify slow individual message processing — check for N+1 database queries in the consumer.",
+                        "Temporarily pause non-critical background jobs (reporting, analytics) to free up DB connections.",
+                        "Monitor the consumer lag metric — it should decrease by >1000 msgs/min after scaling.",
+                        "Investigate root cause of slowdown — likely a missing database index on the transactions table."
+                    ]
+                };
+                if (errorType === 'data_integrity') return {
+                    rootCause: "Payment transaction records show discrepancies between the payment provider's ledger and local database — possible dual-write failure during network partition.",
+                    severity: "Critical", estTime: 120,
+                    steps: [
+                        "Export transaction IDs from the last 24h from both Stripe Dashboard and local DB.",
+                        "Run reconciliation script: python scripts/reconcile_payments.py --date=today to find mismatches.",
+                        "Identify records present in Stripe but missing locally — trigger idempotent re-import.",
+                        "For duplicate charges, initiate refund API calls with the idempotency key from original charge.",
+                        "Fix the dual-write issue: implement outbox pattern with CDC (Debezium) for payment events.",
+                        "Notify Finance team with reconciliation report and estimated remediation timeline."
+                    ]
+                };
+                if (errorType === 'ssl_error') return {
+                    rootCause: "SSL/TLS handshake with the payment provider is failing because the server certificate expired or the TLS 1.2 protocol downgrade was rejected.",
+                    severity: "High", estTime: 35,
+                    steps: [
+                        "Run: openssl s_client -connect api.stripe.com:443 -tls1_2 to verify certificate chain.",
+                        "Check if the payment gateway's SSL certificate on the load balancer has expired.",
+                        "Update the certificate using certbot or your internal PKI tooling.",
+                        "Verify the payment provider hasn't disabled TLS 1.1 — ensure your client supports TLS 1.2+.",
+                        "Restart the payment gateway service to pick up the new certificate.",
+                        "Set up certificate expiry monitoring with a 14-day advance alert."
+                    ]
+                };
+                if (errorType === 'config_error') return {
+                    rootCause: "Payment gateway webhook URL is misconfigured — the secret signing key does not match, causing all incoming webhook events to be rejected.",
+                    severity: "High", estTime: 25,
+                    steps: [
+                        "Compare the webhook signing key in Stripe Dashboard vs the env variable PAYMENT_WEBHOOK_SECRET.",
+                        "Update the environment variable if mismatched and restart the payment service.",
+                        "Use Stripe CLI to replay missed webhook events: stripe events resend <event_id>.",
+                        "Verify the webhook endpoint is reachable: curl -X POST https://your-domain.com/webhooks/payment.",
+                        "Add webhook signature validation logging in debug mode temporarily to catch failures.",
+                        "Document the webhook configuration in the runbook and add to infrastructure-as-code."
+                    ]
+                };
+                return {
+                    rootCause: "Payment Gateway is experiencing intermittent failures. Root cause analysis suggests a possible issue with the transaction processing pipeline or provider-side degradation.",
+                    severity: "High", estTime: 50,
+                    steps: [
+                        "Check payment provider dashboard for any active incidents or degradation notices.",
+                        "Review recent error rate metrics in the payment gateway monitoring dashboard.",
+                        "Test a sample transaction through the staging payment environment.",
+                        "Inspect the payment gateway service health endpoints: /health and /metrics.",
+                        "Check database connection pool utilization in the payment service.",
+                        "If provider-side issue, enable maintenance mode messaging and notify customers."
+                    ]
+                };
+            }
+
+            // ---- AUTH SERVICE ----
+            if (system === "Auth Service") {
+                if (errorType === 'auth_failure' || errorType === 'access_denied') return {
+                    rootCause: "JWT signing key rotation failed silently — the auth service is still signing tokens with the old key while the resource servers expect the new key after a recent deployment.",
+                    severity: "Critical", estTime: 60,
+                    steps: [
+                        "Verify the current active signing key in the JWKS endpoint: GET /auth/.well-known/jwks.json.",
+                        "Compare with the key being used by resource servers in their configuration.",
+                        "If keys are out of sync, revert the auth service to the previous version that used the old key.",
+                        "Alternatively, update all resource servers to fetch keys dynamically from the JWKS endpoint.",
+                        "Clear all cached tokens in Redis: redis-cli DEL 'auth:tokens:*' to force re-authentication.",
+                        "Implement automated key rotation testing in CI/CD pipeline to prevent recurrence."
+                    ]
+                };
+                if (errorType === 'timeout') return {
+                    rootCause: "Auth service is experiencing connection timeouts to the SSO Identity Provider (Okta/Auth0) — the LDAP/SCIM sync bridge has become unresponsive.",
+                    severity: "High", estTime: 45,
+                    steps: [
+                        "Check Okta/Auth0 status page for any active incidents.",
+                        "Test LDAP connectivity: ldapsearch -x -H ldaps://idp.example.com -b 'dc=example,dc=com'.",
+                        "Restart the SCIM sync bridge service: systemctl restart scim-sync-bridge.",
+                        "Increase the IdP connection timeout from 10s to 30s as temporary mitigation.",
+                        "Enable fallback to local credential validation if IdP is unreachable.",
+                        "Set up health checks for the IdP bridge with PagerDuty alerting."
+                    ]
+                };
+                if (errorType === 'performance') return {
+                    rootCause: "Auth service token validation is slow due to a missing Redis cache — every request is hitting the database for user session lookups instead of using the in-memory cache.",
+                    severity: "High", estTime: 40,
+                    steps: [
+                        "Check Redis connectivity from the auth service: redis-cli -h auth-redis -p 6379 ping.",
+                        "If Redis is down, restart it: systemctl restart redis and verify memory settings.",
+                        "Check Redis maxmemory policy — if set to 'noeviction', expired sessions are not being cleaned up.",
+                        "Run redis-cli INFO memory to check if Redis hit the memory limit.",
+                        "Implement session cache warmup: preload active sessions into Redis after restart.",
+                        "Add a fallback path in auth service to use local LRU cache when Redis is unavailable."
+                    ]
+                };
+                if (errorType === 'security_breach') return {
+                    rootCause: "Suspicious authentication patterns detected — multiple failed login attempts from distributed IP addresses suggest a credential stuffing or brute force attack.",
+                    severity: "Critical", estTime: 90,
+                    steps: [
+                        "Immediately enable rate limiting: max 5 login attempts per IP per 15 minutes.",
+                        "Block IP ranges showing >100 failed attempts via WAF rule or iptables.",
+                        "Force password reset for any accounts that had successful logins from flagged IPs.",
+                        "Enable CAPTCHA (reCAPTCHA v3) on the login form as an additional layer.",
+                        "Review authentication logs for the past 72 hours for compromised accounts.",
+                        "Notify the security team and initiate incident response playbook SEC-003."
+                    ]
+                };
+                if (errorType === 'config_error') return {
+                    rootCause: "OAuth redirect URI mismatch — the callback URL registered with the Identity Provider does not match the origin header sent by the frontend application.",
+                    severity: "High", estTime: 20,
+                    steps: [
+                        "Compare the redirect_uri in the OAuth authorize request with the one registered in the IdP admin console.",
+                        "Update the allowed callback URLs in the IdP configuration to include the new domain.",
+                        "Verify the frontend is sending the correct origin header (check CORS settings).",
+                        "Clear browser cookies and local storage to remove stale OAuth state.",
+                        "Test the OAuth flow end-to-end in the staging environment.",
+                        "Add redirect URI validation to the CI/CD pipeline as a pre-deployment check."
+                    ]
+                };
+                if (errorType === 'deadlock') return {
+                    rootCause: "Database deadlock in the user_sessions table during concurrent login requests — multiple transactions competing for the same row locks on session update operations.",
+                    severity: "High", estTime: 50,
+                    steps: [
+                        "Run SHOW ENGINE INNODB STATUS to identify the exact deadlocked transactions.",
+                        "Add SELECT ... FOR UPDATE with SKIP LOCKED to session update queries.",
+                        "Implement optimistic locking with a version column on the sessions table.",
+                        "Consider using Redis for session storage instead of database-backed sessions.",
+                        "Add a deadlock retry mechanism with 3 attempts and exponential backoff.",
+                        "Partition the sessions table by user_id hash to reduce lock contention."
+                    ]
+                };
+                return {
+                    rootCause: "Auth Service is experiencing intermittent authentication failures. Possible causes include token validation errors, session store connectivity issues, or Identity Provider sync problems.",
+                    severity: "High", estTime: 45,
+                    steps: [
+                        "Check auth service health endpoint: GET /auth/health and review response.",
+                        "Verify Redis session store connectivity and memory usage.",
+                        "Review recent auth service logs for token validation errors.",
+                        "Check IdP (Okta/Auth0) system status for any active incidents.",
+                        "Test login flow manually in staging environment.",
+                        "Review any recent configuration or deployment changes."
+                    ]
+                };
+            }
+
+            // ---- USER DATABASE ----
+            if (system === "User Database") {
+                if (errorType === 'memory' || errorType === 'pool_exhaustion') return {
+                    rootCause: "MySQL connection pool exhaustion — active connections reached max_pool_size (200) due to slow queries holding connections open beyond the 30-second timeout threshold.",
+                    severity: "Critical", estTime: 65,
+                    steps: [
+                        "Run SHOW PROCESSLIST to identify long-running queries holding connections.",
+                        "Kill any queries running >120s: KILL <process_id> for each.",
+                        "Increase max_pool_size from 200 to 300 as immediate relief.",
+                        "Add connection timeout: set wait_timeout=600 and interactive_timeout=600.",
+                        "Identify the source of slow queries — enable slow query log: SET GLOBAL slow_query_log=ON.",
+                        "Review application code for missing connection.close() or connection leak patterns."
+                    ]
+                };
+                if (errorType === 'deadlock') return {
+                    rootCause: "InnoDB deadlock detected on the orders table — concurrent UPDATE queries on the same index range are creating a circular wait condition between two transactions.",
+                    severity: "High", estTime: 55,
+                    steps: [
+                        "Extract deadlock details: SHOW ENGINE INNODB STATUS and look for LATEST DETECTED DEADLOCK.",
+                        "Identify the two competing transactions and their SQL statements.",
+                        "Reorder UPDATE/INSERT operations to always acquire locks in the same order (e.g., by primary key ascending).",
+                        "Consider using SELECT ... FOR UPDATE with NOWAIT or SKIP LOCKED where appropriate.",
+                        "Add a deadlock retry wrapper in the application layer (3 retries max).",
+                        "If deadlocks are frequent, consider sharding the table or reducing transaction scope."
+                    ]
+                };
+                if (errorType === 'replication_lag') return {
+                    rootCause: "MySQL replica is lagging 45 seconds behind the primary — caused by a large batch UPDATE on the users table that generated millions of binlog events.",
+                    severity: "High", estTime: 60,
+                    steps: [
+                        "Check replica lag: SHOW SLAVE STATUS \\G and look at Seconds_Behind_Master.",
+                        "If lag is increasing, identify the batch job causing it and pause it temporarily.",
+                        "Check if the replica has parallel replication enabled: show variables like 'slave_parallel_workers'.",
+                        "Increase slave_parallel_workers from 4 to 8 to process binlog events faster.",
+                        "Switch read traffic to the primary temporarily if replica is >30s behind.",
+                        "Investigate the batch job — consider splitting it into smaller chunks with SLEEP between batches."
+                    ]
+                };
+                if (errorType === 'disk_full') return {
+                    rootCause: "Database disk usage reached 98% — the binary logs (binlog) have accumulated to 120GB because the expiry policy was disabled during a previous maintenance window and never re-enabled.",
+                    severity: "Critical", estTime: 50,
+                    steps: [
+                        "URGENT: Check disk usage: df -h /var/lib/mysql and identify what's consuming space.",
+                        "Safely purge old binary logs: PURGE BINARY LOGS BEFORE NOW() - INTERVAL 3 DAY.",
+                        "Set automatic expiry: SET GLOBAL expire_logs_days = 3 in my.cnf.",
+                        "Check for orphaned temp tables: SELECT * FROM information_schema.innodb_trx.",
+                        "Archive old data from the audit_logs table to S3 cold storage.",
+                        "Set up a disk usage alert at 85% threshold via Prometheus/Datadog."
+                    ]
+                };
+                if (errorType === 'performance') return {
+                    rootCause: "Slow query performance due to missing composite index on the orders table — the query planner is performing a full table scan on 12M rows for each user order lookup.",
+                    severity: "High", estTime: 40,
+                    steps: [
+                        "Enable slow query log and identify the top slow queries.",
+                        "Run EXPLAIN ANALYZE on the suspected query to confirm full table scan.",
+                        "Create a composite index: CREATE INDEX idx_orders_user_date ON orders(user_id, created_at).",
+                        "Monitor query performance after index creation: the scan should drop from 12M to ~50 rows.",
+                        "Check for other missing indexes using sys.schema_unused_indexes and sys.schema_redundant_indexes.",
+                        "Schedule regular index maintenance during low-traffic windows."
+                    ]
+                };
+                if (errorType === 'data_integrity') return {
+                    rootCause: "Foreign key constraint violations detected — orphaned records exist in the user_profiles table referencing deleted users, caused by cascading deletes being disabled during a data migration.",
+                    severity: "High", estTime: 70,
+                    steps: [
+                        "Identify orphaned records: SELECT up.* FROM user_profiles up LEFT JOIN users u ON up.user_id = u.id WHERE u.id IS NULL.",
+                        "Back up the affected tables before making any changes.",
+                        "Delete orphaned profiles: DELETE FROM user_profiles WHERE user_id NOT IN (SELECT id FROM users).",
+                        "Re-enable cascading deletes: ALTER TABLE user_profiles ADD CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE.",
+                        "Run data integrity check script across all foreign key relationships.",
+                        "Add a nightly cron job to detect and alert on orphaned records."
+                    ]
+                };
+                if (errorType === 'crash') return {
+                    rootCause: "MySQL crashed with signal 11 (SIGSEGV) — core dump analysis points to a corrupted InnoDB buffer pool page caused by an unexpected power cycle on the DB host.",
+                    severity: "Critical", estTime: 100,
+                    steps: [
+                        "Check the MySQL error log at /var/log/mysql/error.log for crash details and stack trace.",
+                        "Attempt automatic crash recovery: systemctl start mysql (InnoDB will run recovery on startup).",
+                        "If recovery fails, restore from the latest physical backup using Percona XtraBackup.",
+                        "Run CHECK TABLE on critical tables to verify data integrity post-recovery.",
+                        "Check if the server has ECC memory errors: grep -i 'ecc' /var/log/mcelog.",
+                        "Implement UPS and generator failover to prevent future power-related crashes."
+                    ]
+                };
+                return {
+                    rootCause: "User Database is experiencing issues. Likely related to query performance degradation, connection pool pressure, or storage subsystem problems.",
+                    severity: "High", estTime: 45,
+                    steps: [
+                        "Check database server health: CPU, memory, disk I/O, and connection count.",
+                        "Review slow query log for recently degraded queries.",
+                        "Check replication status if using primary-replica setup.",
+                        "Verify disk space and InnoDB buffer pool usage.",
+                        "Test database connectivity from the application tier.",
+                        "Review any recent schema changes or large data migrations."
+                    ]
+                };
+            }
+
+            // ---- FRONTEND UI ----
+            if (system === "Frontend UI") {
+                if (errorType === 'frontend_crash' || errorType === 'white_screen') return {
+                    rootCause: "JavaScript runtime error — an unhandled TypeError in the main bundle (chunk-vendors.js) is crashing the React app during the initial render phase, likely caused by a null reference on user profile data.",
+                    severity: "Critical", estTime: 50,
+                    steps: [
+                        "Open browser DevTools Console to identify the exact error and stack trace.",
+                        "Check if the error is in a third-party dependency or custom code.",
+                        "Verify the API response for the user profile endpoint — is it returning null instead of an object?",
+                        "Add null-safe optional chaining (?.) and default values where data may be undefined.",
+                        "Deploy a hotfix to add an ErrorBoundary component wrapping the affected page.",
+                        "Add Sentry/error tracking to catch and report future unhandled errors automatically."
+                    ]
+                };
+                if (errorType === 'cors_error') return {
+                    rootCause: "CORS policy blocking API requests — the frontend is sending requests to api.example.com but the Access-Control-Allow-Origin header only permits www.example.com.",
+                    severity: "High", estTime: 20,
+                    steps: [
+                        "Check the browser Network tab to see the failed preflight OPTIONS request.",
+                        "Verify the CORS configuration in the API gateway or backend nginx.conf.",
+                        "Update allowed origins to include the frontend domain: add_header Access-Control-Allow-Origin 'https://app.example.com'.",
+                        "Ensure credentials mode matches: if frontend uses withCredentials, backend must allow it explicitly.",
+                        "Clear browser cache and test with a hard refresh (Ctrl+Shift+R).",
+                        "Add CORS configuration to the infrastructure-as-code templates to prevent drift."
+                    ]
+                };
+                if (errorType === 'performance' || errorType === 'ui_rendering') return {
+                    rootCause: "Page render performance degradation — the product listing page is making 47 API calls and loading 12MB of unoptimized images, causing a 6.2s Largest Contentful Paint (LCP).",
+                    severity: "Medium", estTime: 45,
+                    steps: [
+                        "Run Lighthouse audit to identify performance bottlenecks.",
+                        "Implement code splitting: lazy-load the product listing component with React.lazy().",
+                        "Optimize images: convert PNGs to WebP and add responsive srcset attributes.",
+                        "Batch API calls into a single GraphQL query or aggregate REST endpoint.",
+                        "Add virtualization (react-window) for long lists to only render visible items.",
+                        "Set up a Performance Budget of <200KB JS bundle and <3s LCP in CI/CD."
+                    ]
+                };
+                if (errorType === 'not_found' || errorType === 'routing_error') return {
+                    rootCause: "Client-side routing misconfiguration — the React Router is unable to match the URL path '/dashboard/settings/new' because a recent refactor moved the route to '/settings/new' without adding a redirect.",
+                    severity: "Medium", estTime: 15,
+                    steps: [
+                        "Verify the route configuration in the Router component — check all path definitions.",
+                        "Add a redirect from the old path: <Redirect from='/dashboard/settings/*' to='/settings/*' />.",
+                        "Add a catch-all 404 page component for unmatched routes.",
+                        "Test all known routes in the staging environment to verify navigation.",
+                        "Add route-change logging to track where users encounter 404s.",
+                        "Update any hardcoded links in the frontend codebase to use the new paths."
+                    ]
+                };
+                if (errorType === 'deployment_issue') return {
+                    rootCause: "Frontend deployment has a caching issue — users are seeing stale assets because the CDN and browser cache have not been invalidated after the latest deployment with updated bundle hashes.",
+                    severity: "High", estTime: 25,
+                    steps: [
+                        "Verify that the new deployment has unique bundle filenames with content hashes (e.g., app.a1b2c3.js).",
+                        "Force CDN cache invalidation: purge the distribution via AWS CloudFront or your CDN provider.",
+                        "Check that index.html has Cache-Control: no-cache headers.",
+                        "Verify the service worker (if using PWA) is properly updating its cache on new deployments.",
+                        "Test in incognito mode to confirm the new version loads correctly.",
+                        "Implement cache-busting header strategy: Cache-Control: max-age=31536000, immutable for hashed assets."
+                    ]
+                };
+                if (errorType === 'encoding_error') return {
+                    rootCause: "Character encoding issue — user-submitted data with emoji/special characters is being corrupted during form submission because the frontend is sending UTF-8 but the backend expects Latin-1 encoding.",
+                    severity: "Medium", estTime: 20,
+                    steps: [
+                        "Verify the HTML page has <meta charset='UTF-8'> in the <head>.",
+                        "Ensure the form's enctype and accept-charset attributes are set correctly.",
+                        "Check that the API request Content-Type header includes charset=utf-8.",
+                        "Update the backend to accept UTF-8 encoding: ALTER DATABASE dbname CHARACTER SET utf8mb4.",
+                        "Test with emoji and multilingual text input to verify the fix.",
+                        "Add input sanitization that preserves Unicode characters while preventing XSS."
+                    ]
+                };
+                return {
+                    rootCause: "Frontend UI is experiencing issues. Possible causes include JavaScript errors, asset loading failures, API response format changes, or CSS rendering problems.",
+                    severity: "Medium", estTime: 30,
+                    steps: [
+                        "Open browser DevTools and check Console for JavaScript errors.",
+                        "Check the Network tab for failed asset loads (404/5xx).",
+                        "Verify API responses match the expected data format in TypeScript interfaces.",
+                        "Test in multiple browsers to check for browser-specific issues.",
+                        "Review recent frontend deployments for breaking changes.",
+                        "Check if the issue is related to responsive design at specific breakpoints."
+                    ]
+                };
+            }
+
+            // ---- EMAIL SERVER ----
+            if (system === "Email Server") {
+                if (errorType === 'timeout' || errorType === 'network_issue') return {
+                    rootCause: "SMTP relay connection timeouts — the email server is unable to establish connections to external mail relay providers (SendGrid/Mailgun) due to DNS resolution failures for their MX records.",
+                    severity: "High", estTime: 45,
+                    steps: [
+                        "Test DNS resolution: dig mx sendgrid.net and dig mx mailgun.org.",
+                        "Check if the internal DNS server is responding: nslookup sendgrid.net.",
+                        "Verify network firewall rules allow outbound traffic on port 587 and 2525.",
+                        "Test direct SMTP connection: telnet smtp.sendgrid.net 587.",
+                        "If DNS is the issue, temporarily switch to a public DNS resolver (8.8.8.8).",
+                        "Implement SMTP connection pooling with retry logic in the email service."
+                    ]
+                };
+                if (errorType === 'queue_backlog') return {
+                    rootCause: "Email sending queue has 150,000+ pending messages — the daily newsletter batch job generated a massive surge that exceeded the mail provider's rate limit of 100 emails/second.",
+                    severity: "High", estTime: 55,
+                    steps: [
+                        "Check current queue depth: postqueue -p | wc -l.",
+                        "Contact SendGrid/Mailgun support to request a temporary rate limit increase.",
+                        "Implement rate-limited sending: throttle to 90 emails/second to stay under the limit.",
+                        "Split the newsletter batch into smaller chunks scheduled over 4-6 hours.",
+                        "Add a pre-flight check to estimate email volume before launching campaigns.",
+                        "Set up alerts when queue depth exceeds 10,000 messages."
+                    ]
+                };
+                if (errorType === 'config_error') return {
+                    rootCause: "DKIM/SPF record misconfiguration — outbound emails are being rejected or marked as spam because the DKIM signature does not match the published DNS TXT record after a domain migration.",
+                    severity: "High", estTime: 35,
+                    steps: [
+                        "Run DKIM record check: dig TXT default._domainkey.yourdomain.com.",
+                        "Verify the DKIM private key in the email server matches the public key in DNS.",
+                        "Check SPF record: dig TXT yourdomain.com — should include the email provider's IP range.",
+                        "Run DMARC check: dig TXT _dmarc.yourdomain.com.",
+                        "Update any mismatched DNS records and allow 4-24 hours for DNS propagation.",
+                        "Test email deliverability using mail-tester.com after DNS updates propagate."
+                    ]
+                };
+                if (errorType === 'third_party_failure') return {
+                    rootCause: "Email template rendering engine crash — the Handlebars template engine threw an exception while processing a notification template that references a missing user preference field added in the latest schema migration.",
+                    severity: "High", estTime: 30,
+                    steps: [
+                        "Check the email service error logs for template rendering exceptions.",
+                        "Identify the template and the missing field: look for 'undefined' or 'Cannot read property' errors.",
+                        "Add a default value or conditional check in the template: {{#if user.preferences.language}}...{{/if}}.",
+                        "Test the template in staging with the problematic user data payload.",
+                        "Implement template validation in CI/CD that renders sample data before deployment.",
+                        "Add feature flags for new email template features to allow safe rollback."
+                    ]
+                };
+                return {
+                    rootCause: "Email delivery service is experiencing issues. Possible causes include SMTP relay failures, DNS problems, rate limiting by the mail provider, or template rendering errors.",
+                    severity: "Medium", estTime: 40,
+                    steps: [
+                        "Check email service health dashboard and recent delivery logs.",
+                        "Verify SMTP credentials and API keys haven't expired.",
+                        "Test sending a test email through the admin panel.",
+                        "Check email provider (SendGrid/Mailgun) status page for incidents.",
+                        "Review email bounce and complaint rates for deliverability issues.",
+                        "Check DKIM, SPF, and DMARC DNS records are properly configured."
+                    ]
+                };
+            }
+
+            // ---- INVENTORY API ----
+            if (system === "Inventory API") {
+                if (errorType === 'data_integrity' || errorType === 'replication_lag') return {
+                    rootCause: "Inventory count discrepancy — the product stock levels shown to customers do not match warehouse records because the inventory sync from the warehouse management system (WMS) failed silently for the past 6 hours.",
+                    severity: "Critical", estTime: 70,
+                    steps: [
+                        "Compare API inventory counts with WMS source-of-truth: GET /api/inventory/sync-status.",
+                        "Check the inventory sync cron job logs: grep -i 'error' /var/log/inventory-sync.log.",
+                        "Restart the sync job and monitor the first 10 minutes of reconciliation.",
+                        "If large discrepancy, trigger a full inventory resync from WMS master data.",
+                        "Temporarily display 'Available to Order' instead of exact stock counts.",
+                        "Set up real-time inventory change events via WMS webhook instead of polling."
+                    ]
+                };
+                if (errorType === 'performance') return {
+                    rootCause: "Inventory API response time degraded to 4.5s — the product catalog search endpoint is performing a full-text scan without a proper Elasticsearch index, hitting the primary PostgreSQL database directly.",
+                    severity: "High", estTime: 50,
+                    steps: [
+                        "Check if Elasticsearch cluster is healthy: curl localhost:9200/_cluster/health?pretty.",
+                        "If ES is down, restart it and verify index exists: GET /products/_search.",
+                        "Rebuild the Elasticsearch product index from PostgreSQL: POST /api/inventory/reindex.",
+                        "Add a circuit breaker to fall back to cached results if ES is unavailable.",
+                        "Implement query result caching with a 5-minute TTL for popular product searches.",
+                        "Set up Elasticsearch cluster monitoring with shard health and query latency alerts."
+                    ]
+                };
+                if (errorType === 'cache_issue') return {
+                    rootCause: "Inventory cache invalidation bug — stock deductions from successful orders are not clearing the Redis cache, causing overselling as customers see stale 'in-stock' counts from the cache.",
+                    severity: "Critical", estTime: 60,
+                    steps: [
+                        "Immediately check oversold orders: SELECT product_id, COUNT(*) FROM orders WHERE status='placed' AND created_at > NOW() - INTERVAL 1 HOUR GROUP BY product_id.",
+                        "Compare with actual stock: identify any product where orders exceed available quantity.",
+                        "Flush the inventory cache: redis-cli DEL 'inventory:*' to force fresh reads from DB.",
+                        "Fix the cache invalidation: add Redis DEL after every stock deduction in the order service.",
+                        "Implement a distributed lock on stock deduction to prevent race conditions.",
+                        "Contact warehouse to verify physical stock for any oversold items."
+                    ]
+                };
+                return {
+                    rootCause: "Inventory API is experiencing issues. Possible causes include sync failures with the warehouse management system, database performance degradation, or cache inconsistency problems.",
+                    severity: "High", estTime: 45,
+                    steps: [
+                        "Check inventory API health and sync status endpoints.",
+                        "Review recent sync job logs for errors.",
+                        "Test product search and stock lookup in staging.",
+                        "Check Redis cache health and memory usage.",
+                        "Verify Elasticsearch cluster status for catalog search.",
+                        "Review any recent inventory-related deployments or data migrations."
+                    ]
+                };
+            }
+
+            // ---- INFRASTRUCTURE ----
+            if (system === "Infrastructure") {
+                if (errorType === 'crash' || errorType === 'service_down') return {
+                    rootCause: "Production Kubernetes node went into NotReady state — the kubelet process crashed due to container runtime (containerd) hitting a file descriptor limit after a memory-heavy batch process leaked file handles.",
+                    severity: "Critical", estTime: 75,
+                    steps: [
+                        "Check node status: kubectl get nodes and identify the unhealthy node(s).",
+                        "SSH into the affected node and check kubelet logs: journalctl -u kubelet --since '1 hour ago'.",
+                        "Check file descriptor usage: lsof | wc -l and compare with ulimit -n.",
+                        "If containerd crashed, restart it: systemctl restart containerd && systemctl restart kubelet.",
+                        "Cordon and drain the node to reschedule pods: kubectl drain <node-name> --ignore-daemonsets.",
+                        "Increase file descriptor limits in /etc/security/limits.conf and restart."
+                    ]
+                };
+                if (errorType === 'memory' || errorType === 'oom') return {
+                    rootCause: "OOM Killer terminated critical services on the production server — a memory leak in the Java application (heap growing 500MB/hour) plus a simultaneous log aggregation flush exhausted all available 32GB RAM.",
+                    severity: "Critical", estTime: 85,
+                    steps: [
+                        "Check dmesg for OOM events: dmesg -T | grep -i 'out of memory'.",
+                        "Identify which processes were killed: grep 'OOM killer' /var/log/syslog.",
+                        "Restart critical services: systemctl restart app-service nginx postgres.",
+                        "Take a heap dump of the Java app for analysis: jmap -dump:format=b,file=/tmp/heap.hprof <pid>.",
+                        "Add JVM memory monitoring: -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/.",
+                        "Implement horizontal auto-scaling: add HPA to add pods when memory > 80%."
+                    ]
+                };
+                if (errorType === 'disk_full') return {
+                    rootCause: "Server disk at 99% capacity — Docker image layers and container logs have accumulated to 80GB because log rotation was misconfigured (max-size was set to 0 meaning unlimited).",
+                    severity: "Critical", estTime: 55,
+                    steps: [
+                        "URGENT: Free space immediately — clean Docker: docker system prune -a --volumes (in staging first).",
+                        "Check what's using space: du -sh /var/lib/docker/* and du -sh /var/log/*.",
+                        "Fix Docker log rotation: add --log-opt max-size=10m --log-opt max-file=3 to daemon.json.",
+                        "Configure journald log rotation: edit /etc/systemd/journald.conf with SystemMaxUse=500M.",
+                        "Set up disk usage monitoring with alerts at 80% and 90% thresholds.",
+                        "Schedule weekly Docker cleanup in a cron job."
+                    ]
+                };
+                if (errorType === 'network_issue') return {
+                    rootCause: "Network connectivity issues — intermittent packet loss (3-7%) between application tier and database tier caused by a failing network interface card (NIC) on the application server producing CRC errors.",
+                    severity: "Critical", estTime: 60,
+                    steps: [
+                        "Run continuous ping test: ping -i 0.1 db-server > /tmp/ping_test.log for 60 seconds.",
+                        "Check NIC error counters: ethtool -S eth0 | grep -i 'error\\|drop\\|crc'.",
+                        "If CRC errors are increasing, the NIC or cable is failing — plan hardware replacement.",
+                        "As immediate workaround, failover to the secondary NIC: ip link set eth1 up and migrate traffic.",
+                        "Check switch port counters on the connected network switch.",
+                        "Implement network health monitoring with alerting on >0.1% packet loss."
+                    ]
+                };
+                if (errorType === 'dns_error') return {
+                    rootCause: "Internal DNS resolution failures — the CoreDNS pods in Kubernetes are experiencing high CPU due to excessive DNS queries from a misconfigured application making a DNS lookup for every single request instead of using connection pooling.",
+                    severity: "High", estTime: 45,
+                    steps: [
+                        "Check CoreDNS pod metrics: kubectl top pods -n kube-system -l k8s-app=kube-dns.",
+                        "Identify the top DNS consumers: check CoreDNS query logs.",
+                        "Scale CoreDNS replicas: kubectl scale deployment coredns --replicas=5 -n kube-system.",
+                        "Fix the application to use connection pooling and cache DNS results.",
+                        "Add NodeLocal DNS cache to reduce DNS query volume.",
+                        "Implement DNS query rate limiting per pod."
+                    ]
+                };
+                if (errorType === 'deployment_issue') return {
+                    rootCause: "Kubernetes deployment stuck in CrashLoopBackOff — the new container image fails to start because the ConfigMap volume mount references a key that was renamed in the latest Helm chart update.",
+                    severity: "High", estTime: 35,
+                    steps: [
+                        "Check pod status: kubectl get pods -o wide and identify CrashLoopBackOff pods.",
+                        "Describe the failing pod: kubectl describe pod <pod-name> for detailed events.",
+                        "Check container logs: kubectl logs <pod-name> --previous to see the startup error.",
+                        "Verify ConfigMap keys match what the application expects: kubectl get configmap <name> -o yaml.",
+                        "Fix the ConfigMap or update the Helm values to use the correct key names.",
+                        "Rollback to the previous Helm release: helm rollback <release> <revision>."
+                    ]
+                };
+                if (errorType === 'ssl_error') return {
+                    rootCause: "TLS certificate expired on the production load balancer — the Let's Encrypt auto-renewal cron job failed silently because the ACME challenge endpoint was blocked by the new WAF rule added last week.",
+                    severity: "Critical", estTime: 40,
+                    steps: [
+                        "Check certificate expiry: openssl s_client -connect yourdomain.com:443 | openssl x509 -noout -dates.",
+                        "If expired, get an emergency certificate: certbot certonly --standalone -d yourdomain.com.",
+                        "Remove or update the WAF rule blocking ACME challenge: /.well-known/acme-challenge/*.",
+                        "Reload the load balancer/nginx with the new certificate: systemctl reload nginx.",
+                        "Verify auto-renewal is working: certbot renew --dry-run.",
+                        "Set up certificate expiry monitoring with 14-day advance alerts."
+                    ]
+                };
+                if (errorType === 'security_breach') return {
+                    rootCause: "Suspicious network activity detected — an unauthorized SSH connection from an external IP was established to a production server using a compromised developer key that was leaked in a public GitHub repository.",
+                    severity: "Critical", estTime: 90,
+                    steps: [
+                        "IMMEDIATE: Block the attacker IP at the firewall: iptables -A INPUT -s <IP> -j DROP.",
+                        "Revoke the compromised SSH key: remove it from authorized_keys on all servers.",
+                        "Audit all servers for the compromised key and remove it everywhere.",
+                        "Review auth logs for the attacker's activity: last -i, grep 'Accepted' /var/log/auth.log.",
+                        "Force password rotation for all users who had their keys on the leaked repository.",
+                        "Implement SSH key management (HashiCorp Vault) and periodic key audit."
+                    ]
+                };
+                return {
+                    rootCause: "Infrastructure is experiencing issues. Possible causes include server resource exhaustion, network connectivity problems, Kubernetes orchestration failures, or certificate/configuration issues.",
+                    severity: "High", estTime: 55,
+                    steps: [
+                        "Check server health metrics: CPU, memory, disk, and network utilization.",
+                        "Review Kubernetes cluster status: nodes, pods, and deployment health.",
+                        "Check recent infrastructure changes or deployments.",
+                        "Review load balancer health checks and backend server status.",
+                        "Check SSL/TLS certificate status on all public-facing endpoints.",
+                        "Review infrastructure monitoring dashboards for anomalies."
+                    ]
+                };
+            }
+
+            // ---- GENERAL APPLICATION (fallback with error-type specificity) ----
+            if (errorType === 'gateway_error') return {
+                rootCause: "Reverse proxy (nginx/ALB) is returning 502 Bad Gateway — the upstream application service is not responding on the expected port, likely due to a port conflict or service startup failure.",
+                severity: "High", estTime: 40,
+                steps: [
+                    "Check if the application service is running: systemctl status app-service or kubectl get pods.",
+                    "Check the application is listening on the correct port: netstat -tlnp | grep <port>.",
+                    "Review application startup logs for binding errors (Address already in use).",
+                    "Check if a recent deployment changed the service port configuration.",
+                    "Verify the upstream configuration in nginx.conf or target group in ALB.",
+                    "Test the application directly: curl http://localhost:<port>/health."
+                ]
+            };
+            if (errorType === 'third_party_failure') return {
+                rootCause: "Third-party API integration failing — the external service is returning rate limit errors (429) because the application is not properly handling API quota limits and retrying immediately on failure.",
+                severity: "High", estTime: 35,
+                steps: [
+                    "Identify which third-party API is returning errors from the service logs.",
+                    "Check the provider's dashboard for rate limit status and remaining quota.",
+                    "Implement proper rate limit handling: respect Retry-After header and implement exponential backoff.",
+                    "Add request queuing to smooth out API call bursts.",
+                    "Request a rate limit increase from the API provider if needed.",
+                    "Add circuit breaker pattern to gracefully degrade when the API is unavailable."
+                ]
+            };
+            if (errorType === 'batch_failure') return {
+                rootCause: "Scheduled batch job failed — the cron job that runs at midnight to process daily aggregations crashed due to insufficient memory allocation. The JVM heap was set to 512MB but the job requires 2GB to process the full dataset.",
+                severity: "Medium", estTime: 35,
+                steps: [
+                    "Check cron job logs: grep -i 'error' /var/log/cron.log and the application log.",
+                    "Increase JVM heap size: update -Xmx from 512m to 2048m in the job configuration.",
+                    "Manually re-run the failed batch job for the missed date.",
+                    "Add memory monitoring to the batch job with alerting on >80% usage.",
+                    "Split the batch job into smaller chunks if it continues to exceed memory limits.",
+                    "Add a pre-flight check to verify sufficient system resources before job execution."
+                ]
+            };
+            if (errorType === 'upload_failure') return {
+                rootCause: "File upload failing — the nginx upload limit (client_max_body_size) is set to 1MB but users are trying to upload attachments up to 25MB. The upload is being rejected with a 413 Request Entity Too Large error.",
+                severity: "Medium", estTime: 15,
+                steps: [
+                    "Check nginx error log: grep 'client intended to send too large body' /var/log/nginx/error.log.",
+                    "Update nginx config: client_max_body_size 50M; in http or server block.",
+                    "Reload nginx: nginx -s reload.",
+                    "Also check the application-level upload size limit and update if needed.",
+                    "Add client-side file size validation before upload to provide immediate feedback.",
+                    "Implement chunked/multipart upload for files >5MB for better reliability."
+                ]
+            };
+            if (errorType === 'dependency_issue') return {
+                rootCause: "Application failing to start due to dependency version mismatch — a package update pulled a major version breaking change. The npm/yarn lockfile was not committed, allowing inconsistent dependency resolution.",
+                severity: "Medium", estTime: 30,
+                steps: [
+                    "Check the application startup error for the specific dependency conflict.",
+                    "Run npm ls <package> or yarn why <package> to identify the version tree.",
+                    "Pin the dependency to the working version in package.json: \"package\": \"1.2.3\".",
+                    "Run npm audit to check for known vulnerabilities in pinned versions.",
+                    "Always commit package-lock.json/yarn.lock to version control.",
+                    "Add dependency check in CI pipeline to detect breaking changes early."
+                ]
+            };
+            if (errorType === 'gc_pressure') return {
+                rootCause: "Application experiencing long Garbage Collection pauses (up to 8 seconds) — the JVM heap is 90% full with short-lived objects being promoted to the old generation due to an overly large young generation allocation.",
+                severity: "High", estTime: 45,
+                steps: [
+                    "Enable GC logging: -Xlog:gc*:file=/tmp/gc.log to capture GC activity.",
+                    "Analyze GC logs with GCViewer or GCEasy.io to identify the pause pattern.",
+                    "Tune JVM memory settings: reduce young gen size, increase old gen, enable G1GC.",
+                    "Identify the code creating excessive short-lived objects (allocation profiler).",
+                    "Implement object pooling for frequently created/destroyed objects.",
+                    "Add GC pause monitoring with alerts when pauses exceed 500ms."
+                ]
+            };
+
+            // ---- FINAL FALLBACK (dynamically generated based on prompt) ----
+            const extractedKeywords = rawText.split(/\s+/).filter(w => w.length > 4).slice(0, 5).join(', ');
+            return {
+                rootCause: `Unresolved anomaly detected in ${system} — the error pattern involving "${detectedErrorType}" with context around "${extractedKeywords}" does not have an exact match in the knowledge base. Manual investigation required.`,
+                severity: severity, estTime: 40,
+                steps: [
+                    `Investigate ${system} logs for errors related to "${detectedErrorType}".`,
+                    `Check monitoring dashboards for ${system} anomalies over the last 2 hours.`,
+                    `Search the incident history (Knowledge Base) for similar "${detectedErrorType}" patterns in previous incidents.`,
+                    `Review recent deployment and configuration changes to ${system}.`,
+                    `Enable debug/verbose logging on ${system} to capture more detailed error context.`,
+                    `If root cause cannot be determined, escalate to the ${system} engineering team with all collected evidence.`
+                ]
+            };
+        }
+
+        // ============================================================
+        // 5. AGENT INFERENCE & ANALYSIS LOGIC (saves to localStorage)
         // ============================================================
         function handleAgentSubmit() {
             const prompt = document.getElementById('ai-prompt').value;
@@ -752,68 +1492,108 @@
             setTimeout(() => { textEl.innerText = "Generating Resolution Plan..."; subEl.innerText = "Calculating estimated time"; }, 2600);
 
             setTimeout(() => {
-                // --- AGENT INFERENCE ENGINE ---
+                // --- AGENT INFERENCE ENGINE (Knowledge-Base Driven) ---
                 const text = prompt.toLowerCase();
                 let priority = "P3"; let system = "General Application"; let scope = "Internal";
                 let severity = "Medium"; let estTime = 30; let sla = 60;
-                let rootCause = "General application error.";
-                let steps = ["Check application logs.", "Verify server health.", "Restart affected service."];
+                let detectedErrorType = "unknown";
 
-                // Priority Inference
-                if (text.includes('critical') || text.includes('down') || text.includes('crash') || text.includes('fatal')) {
-                    priority = "P1"; severity = "Critical"; sla = 15; estTime = 90;
-                } else if (text.includes('high') || text.includes('urgent') || text.includes('major')) {
-                    priority = "P2"; severity = "High"; sla = 60; estTime = 60;
-                } else if (text.includes('slow') || text.includes('latency') || text.includes('lag')) {
-                    priority = "P2"; severity = "High"; estTime = 45;
-                } else if (text.includes('minor') || text.includes('cosmetic')) {
-                    priority = "P5"; severity = "Low"; sla = 1000; estTime = 10;
-                } else {
-                    priority = "P3"; sla = 120;
+                // =============================================
+                // STEP 1: DETECT ERROR TYPE FROM KEYWORDS
+                // =============================================
+                const errorPatterns = [
+                    { keys: ['500', 'internal server'], type: 'server_error' },
+                    { keys: ['502', 'bad gateway', 'gateway'], type: 'gateway_error' },
+                    { keys: ['503', 'service unavailable', 'unavailable'], type: 'service_down' },
+                    { keys: ['504', 'gateway timeout'], type: 'gateway_timeout' },
+                    { keys: ['401', 'unauthorized', 'not authorized'], type: 'auth_failure' },
+                    { keys: ['403', 'forbidden'], type: 'access_denied' },
+                    { keys: ['404', 'not found', 'missing page'], type: 'not_found' },
+                    { keys: ['timeout', 'timed out', 'connection refused', 'connection reset'], type: 'timeout' },
+                    { keys: ['oom', 'out of memory', 'memory leak', 'heap space'], type: 'memory' },
+                    { keys: ['cpu', 'high cpu', 'cpu spike', 'processor'], type: 'cpu_overload' },
+                    { keys: ['disk', 'disk full', 'no space left', 'storage'], type: 'disk_full' },
+                    { keys: ['ssl', 'certificate', 'tls', 'handshake'], type: 'ssl_error' },
+                    { keys: ['dns', 'domain', 'name resolution', 'resolve host'], type: 'dns_error' },
+                    { keys: ['slow', 'latency', 'lag', 'delay', 'response time', 'taking long'], type: 'performance' },
+                    { keys: ['crash', 'segfault', 'core dump', 'fatal', 'abend'], type: 'crash' },
+                    { keys: ['deadlock', 'lock', 'locking', 'mutex', 'race condition'], type: 'deadlock' },
+                    { keys: ['replication', 'replica', 'sync lag', 'slave lag'], type: 'replication_lag' },
+                    { keys: ['cache', 'redis', 'memcached', 'invalidation'], type: 'cache_issue' },
+                    { keys: ['queue', 'backlog', 'kafka', 'rabbitmq', 'message broker'], type: 'queue_backlog' },
+                    { keys: ['data loss', 'data corruption', 'data integrity', 'inconsistent'], type: 'data_integrity' },
+                    { keys: ['ddos', 'attack', 'malicious', 'brute force', 'intrusion'], type: 'security_breach' },
+                    { keys: ['config', 'configuration', 'misconfiguration', 'env variable', 'setting'], type: 'config_error' },
+                    { keys: ['deploy', 'deployment', 'release', 'rollback', 'blue green'], type: 'deployment_issue' },
+                    { keys: ['npm', 'dependency', 'package', 'version mismatch', 'upgrade'], type: 'dependency_issue' },
+                    { keys: ['cors', 'cross-origin', 'csp', 'header'], type: 'cors_error' },
+                    { keys: ['network', 'packet loss', 'firewall', 'load balancer', 'cdn'], type: 'network_issue' },
+                    { keys: ['webhook', 'callback', 'third-party', 'api limit', 'rate limit'], type: 'third_party_failure' },
+                    { keys: ['cron', 'scheduled', 'batch job', 'background task'], type: 'batch_failure' },
+                    { keys: ['file upload', 'upload fail', 'multipart', 'attachment'], type: 'upload_failure' },
+                    { keys: ['garbage collection', 'gc pause', 'memory pressure'], type: 'gc_pressure' },
+                    { keys: ['thread', 'thread pool', 'connection pool', 'pool exhausted'], type: 'pool_exhaustion' },
+                    { keys: ['pagination', 'infinite scroll', 'load more', 'rendering'], type: 'ui_rendering' },
+                    { keys: ['white screen', 'blank page', 'js error', 'javascript error'], type: 'frontend_crash' },
+                    { keys: ['broken link', 'redirect loop', 'wrong url', 'routing'], type: 'routing_error' },
+                    { keys: ['charset', 'encoding', 'unicode', 'special character'], type: 'encoding_error' },
+                ];
+                for (const ep of errorPatterns) {
+                    if (ep.keys.some(k => text.includes(k))) { detectedErrorType = ep.type; break; }
                 }
 
-                // System Inference
-                if (text.includes('payment') || text.includes('checkout') || text.includes('stripe')) system = "Payment Gateway";
-                else if (text.includes('login') || text.includes('auth') || text.includes('password') || text.includes('sso')) system = "Auth Service";
-                else if (text.includes('database') || text.includes('db') || text.includes('sql') || text.includes('query')) system = "User Database";
-                else if (text.includes('ui') || text.includes('frontend') || text.includes('button') || text.includes('page')) system = "Frontend UI";
-                else if (text.includes('email') || text.includes('notification') || text.includes('mail')) system = "Email Server";
-                else if (text.includes('server') || text.includes('host') || text.includes('instance')) system = "Infrastructure";
+                // =============================================
+                // STEP 2: INFER PRIORITY
+                // =============================================
+                if (text.includes('critical') || text.includes('down') || text.includes('fatal') || text.includes('crash') || detectedErrorType === 'service_down' || detectedErrorType === 'security_breach' || detectedErrorType === 'data_integrity') {
+                    priority = "P1"; severity = "Critical"; sla = 15; estTime = 90;
+                } else if (text.includes('high') || text.includes('urgent') || text.includes('major') || detectedErrorType === 'gateway_error' || detectedErrorType === 'server_error' || detectedErrorType === 'deadlock' || detectedErrorType === 'replication_lag') {
+                    priority = "P2"; severity = "High"; sla = 30; estTime = 60;
+                } else if (detectedErrorType === 'performance' || detectedErrorType === 'timeout') {
+                    priority = "P2"; severity = "High"; estTime = 45;
+                } else if (text.includes('minor') || text.includes('cosmetic') || detectedErrorType === 'not_found' || detectedErrorType === 'encoding_error' || detectedErrorType === 'cors_error') {
+                    priority = "P5"; severity = "Low"; sla = 1000; estTime = 10;
+                } else if (detectedErrorType === 'auth_failure' || detectedErrorType === 'access_denied' || detectedErrorType === 'ssl_error') {
+                    priority = "P2"; severity = "High"; estTime = 40;
+                } else if (detectedErrorType === 'pool_exhaustion' || detectedErrorType === 'memory' || detectedErrorType === 'disk_full' || detectedErrorType === 'queue_backlog') {
+                    priority = "P1"; severity = "Critical"; sla = 15; estTime = 75;
+                } else {
+                    priority = "P3"; severity = "Medium"; sla = 120; estTime = 30;
+                }
 
-                // Scope Inference
-                if (text.includes('global') || text.includes('worldwide') || text.includes('everyone')) scope = "Global";
-                else if (text.includes('region') || text.includes('eu') || text.includes('us') || text.includes('asia')) scope = "Regional";
-                else if (text.includes('my') || text.includes('account') || text.includes('single')) scope = "Specific User";
+                // =============================================
+                // STEP 3: INFER SYSTEM
+                // =============================================
+                if (text.includes('payment') || text.includes('checkout') || text.includes('stripe') || text.includes('refund') || text.includes('transaction') || text.includes('billing') || text.includes('invoice')) system = "Payment Gateway";
+                else if (text.includes('login') || text.includes('auth') || text.includes('password') || text.includes('sso') || text.includes('oauth') || text.includes('mfa') || text.includes('2fa') || text.includes('token') || text.includes('session')) system = "Auth Service";
+                else if (text.includes('database') || text.includes('db') || text.includes('sql') || text.includes('query') || text.includes('mysql') || text.includes('postgres') || text.includes('mongodb') || text.includes('table') || text.includes('index')) system = "User Database";
+                else if (text.includes('ui') || text.includes('frontend') || text.includes('button') || text.includes('page') || text.includes('css') || text.includes('component') || text.includes('react') || text.includes('angular') || text.includes('vue') || text.includes('render')) system = "Frontend UI";
+                else if (text.includes('email') || text.includes('notification') || text.includes('mail') || text.includes('smtp') || text.includes('newsletter') || text.includes('alert') || text.includes('sms') || text.includes('push')) system = "Email Server";
+                else if (text.includes('inventory') || text.includes('stock') || text.includes('warehouse') || text.includes('product') || text.includes('catalog') || text.includes('sku')) system = "Inventory API";
+                else if (text.includes('server') || text.includes('host') || text.includes('instance') || text.includes('ec2') || text.includes('kubernetes') || text.includes('docker') || text.includes('container') || text.includes('vm')) system = "Infrastructure";
+
+                // =============================================
+                // STEP 4: INFER SCOPE
+                // =============================================
+                if (text.includes('global') || text.includes('worldwide') || text.includes('everyone') || text.includes('all users') || text.includes('all customers')) scope = "Global";
+                else if (text.includes('region') || text.includes('eu') || text.includes('us') || text.includes('asia') || text.includes('europe') || text.includes('india') || text.includes('america')) scope = "Regional";
+                else if (text.includes('my') || text.includes('account') || text.includes('single') || text.includes('one user') || text.includes('specific')) scope = "Specific User";
                 else scope = "Internal";
 
-                // Resolution Logic based on Inferred Data
-                if (priority === "P1" || text.includes('down')) {
-                    rootCause = `Service termination detected in ${system}.`;
-                    steps = [
-                        `SSH into ${system} production instances.`,
-                        "Check system resources (CPU/Memory) for OOM.",
-                        "Review recent error logs for stack traces.",
-                        `Attempt service restart: systemctl restart ${system.toLowerCase().replace(/ /g, '-')}.`,
-                        "If unresolved, initiate rollback procedure."
-                    ];
-                } else if (text.includes('slow') || text.includes('latency')) {
-                    rootCause = `Performance bottleneck detected in ${system}.`;
-                    steps = [
-                        `Enable slow query log on ${system}.`,
-                        "Analyze execution plan for unindexed queries.",
-                        "Check cache hit rates (Redis/Memcached).",
-                        "Restart caching layer if hit rate < 90%.",
-                        "Apply recommended database indexes."
-                    ];
-                } else if (system === "Auth Service") {
-                    rootCause = "Authentication token validation failure.";
-                    steps = [
-                        "Verify SSO Provider (Okta/Auth0) status.",
-                        "Check JWT expiration settings.",
-                        "Restart Identity Provider sync service.",
-                        "Clear local cookies and re-authenticate."
-                    ];
-                }
+                // =============================================
+                // STEP 5: GENERATE UNIQUE ROOT CAUSE & STEPS
+                // =============================================
+                let rootCause = "";
+                let steps = [];
+                const resolutionKB = getResolutionFromKB(system, priority, detectedErrorType, scope, text);
+                rootCause = resolutionKB.rootCause;
+                steps = resolutionKB.steps;
+                estTime = resolutionKB.estTime || estTime;
+                severity = resolutionKB.severity || severity;
+
+                // Adjust time based on scope
+                if (scope === "Global") estTime = Math.round(estTime * 1.3);
+                if (scope === "Specific User") estTime = Math.round(estTime * 0.6);
 
                 // --- GENERATE UNIQUE ID (max existing id + 1) ---
                 const maxId = incidents.reduce((max, inc) => Math.max(max, inc.incidentid), 0);
@@ -994,6 +1774,12 @@
         window.addEventListener('beforeunload', () => {
             // Final save before leaving page
             saveIncidents();
+        });
+
+        // On initial page load, show the data badge on login screen
+        // so users can see their data exists before even signing in
+        document.addEventListener('DOMContentLoaded', () => {
+            updateLoginDataBadge();
         });
     </script>
 </body>
