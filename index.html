@@ -143,6 +143,8 @@
 
         .btn { padding: 0.6rem 1.2rem; border-radius: 6px; border: none; font-weight: 500; cursor: pointer; transition: 0.2s; }
         .btn-primary { background: var(--primary-color); color: white; }
+        .btn-danger { background: var(--danger-color); color: white; }
+        .btn-danger:hover { background: #dc2626; }
         
         .table-container { overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; white-space: nowrap; }
@@ -196,11 +198,41 @@
         }
 
         /* Inference Badges in Resolution */
-        .inference-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+        .inference-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
         .inference-badge { background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
 
         .ai-summary-box { background: #f8fafc; border-left: 4px solid var(--primary-color); padding: 1rem; margin-bottom: 1rem; }
         .ai-summary-title { font-weight: 700; color: var(--primary-color); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 8px; }
+
+        /* Data status indicator */
+        .data-status {
+            display: flex; align-items: center; gap: 8px;
+            padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.8rem;
+            background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;
+        }
+        .data-status-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #22c55e;
+            animation: pulse-dot 2s infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Confirm dialog */
+        .confirm-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 3000;
+            justify-content: center; align-items: center;
+        }
+        .confirm-box {
+            background: white; padding: 2rem; border-radius: 12px;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-width: 400px; text-align: center;
+        }
+        .confirm-box h3 { margin-bottom: 0.75rem; font-size: 1.2rem; }
+        .confirm-box p { color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.9rem; }
+        .confirm-actions { display: flex; gap: 1rem; justify-content: center; }
+        .confirm-actions button { padding: 0.6rem 1.5rem; border-radius: 6px; border: none; font-weight: 600; cursor: pointer; }
 
         /* Toast */
         .toast {
@@ -259,6 +291,18 @@
         </div>
     </div>
 
+    <!-- CONFIRM DIALOG -->
+    <div class="confirm-overlay" id="confirm-overlay">
+        <div class="confirm-box">
+            <h3 id="confirm-title">Reset Data?</h3>
+            <p id="confirm-msg">This will delete all records including your manually added incidents and regenerate the original 50 records. This cannot be undone.</p>
+            <div class="confirm-actions">
+                <button style="background:#e5e7eb; color:#374151;" onclick="closeConfirm()">Cancel</button>
+                <button style="background:#ef4444; color:white;" onclick="confirmResetData()">Reset</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MAIN APP -->
     <nav class="sidebar" id="app-sidebar" style="display:none;">
         <div class="logo">
@@ -298,7 +342,13 @@
                 <section id="page-dashboard">
                     <div class="page-header">
                         <h2 class="page-title">Dashboard</h2>
-                        <span id="date-display" style="color: var(--text-secondary);"></span>
+                        <div style="display:flex; align-items:center; gap:1rem;">
+                            <div class="data-status">
+                                <span class="data-status-dot"></span>
+                                <span id="record-count-status">50 records loaded</span>
+                            </div>
+                            <span id="date-display" style="color: var(--text-secondary);"></span>
+                        </div>
                     </div>
                     <div class="dashboard-grid">
                         <div class="card">
@@ -314,7 +364,13 @@
 
                 <!-- LOG INCIDENT (Agent Mode) -->
                 <section id="page-log-incident" style="display:none;">
-                    <div class="page-header"><h2 class="page-title">AI Operations Agent</h2></div>
+                    <div class="page-header">
+                        <h2 class="page-title">AI Operations Agent</h2>
+                        <div class="data-status">
+                            <span class="data-status-dot"></span>
+                            <span id="ops-record-count">50 records in Knowledge Base</span>
+                        </div>
+                    </div>
                     
                     <!-- Analysis Overlay -->
                     <div id="analyzing-overlay">
@@ -359,7 +415,8 @@
                                 </div>
                             </div>
                             <div style="margin-top: 1rem; padding-top:1rem; border-top:1px dashed #bfdbfe; font-size:0.8rem; color:#64748b; text-align:center;">
-                                This incident has been automatically added to the Training Knowledge Base (INC<span id="new-id"></span>).
+                                This incident has been automatically saved to the Knowledge Base (INC<span id="new-id"></span>). 
+                                It will persist across page refreshes.
                             </div>
                         </div>
                     </div>
@@ -367,8 +424,16 @@
 
                 <!-- DATA HISTORY -->
                 <section id="page-history" style="display:none;">
-                    <div class="page-header"><h2 class="page-title">Full Dataset (Knowledge Base)</h2>
-                        <input type="text" class="form-input" placeholder="Search by ID, Title or System..." style="width: 250px; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px;" onkeyup="filterTable(this.value)">
+                    <div class="page-header">
+                        <h2 class="page-title">Full Dataset (Knowledge Base)</h2>
+                        <div style="display:flex; align-items:center; gap:1rem;">
+                            <div class="data-status">
+                                <span class="data-status-dot"></span>
+                                <span id="history-count">50 records</span>
+                            </div>
+                            <input type="text" class="form-input" placeholder="Search by ID, Title or System..." style="width: 250px; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px;" onkeyup="filterTable(this.value)">
+                            <button class="btn btn-danger" onclick="showResetConfirm()" title="Reset to original 50 records">🗑️ Reset Data</button>
+                        </div>
                     </div>
                     <div class="card" style="padding:0; overflow:hidden;">
                         <div class="table-container">
@@ -382,13 +447,25 @@
 
                 <!-- AI SUMMARIES -->
                 <section id="page-ai-summaries" style="display:none;">
-                    <div class="page-header"><h2 class="page-title">AI Generated Insights</h2></div>
+                    <div class="page-header">
+                        <h2 class="page-title">AI Generated Insights</h2>
+                        <div class="data-status">
+                            <span class="data-status-dot"></span>
+                            <span id="ai-count">50 records analyzed</span>
+                        </div>
+                    </div>
                     <div id="ai-content"></div>
                 </section>
 
                 <!-- STORED REPORTS -->
                 <section id="page-reports" style="display:none;">
-                    <div class="page-header"><h2 class="page-title">Stored Reports</h2></div>
+                    <div class="page-header">
+                        <h2 class="page-title">Stored Reports</h2>
+                        <div class="data-status">
+                            <span class="data-status-dot"></span>
+                            <span id="report-count">50 records</span>
+                        </div>
+                    </div>
                     <div class="dashboard-grid">
                         <div class="card">
                             <h3 style="margin-bottom: 1rem;">Incidents by Affected System</h3>
@@ -408,38 +485,171 @@
     <div id="toast" class="toast"><span class="toast-icon">✓</span><span class="toast-message">Action Successful</span></div>
 
     <script>
-        // --- 1. STATE & DATA ---
+        // ============================================================
+        // LOCAL STORAGE KEYS
+        // ============================================================
+        const STORAGE_KEY = 'opsmanager_incidents';
+        const STORAGE_META_KEY = 'opsmanager_meta';
+
+        // ============================================================
+        // 1. STATE & DATA WITH LOCALSTORAGE PERSISTENCE
+        // ============================================================
         let incidents = [];
-        
+
+        /**
+         * Generate 50 mock training records (deterministic seed based on index).
+         * These are the "original 50" records.
+         */
         function generateMockData() {
+            const data = [];
             const systems = ["Auth Service", "Payment Gateway", "User Database", "Frontend UI", "Inventory API", "Email Server"];
             const priorities = ["P1", "P2", "P3", "P4", "P5"];
             const sampleLogs = ["NullPointerException at line 402", "Connection timeout", "500 Internal Server Error", "Latency > 2000ms", "OOM Killer triggered"];
-            
+            const descriptions = [
+                "Service unresponsive during peak hours",
+                "Intermittent timeout errors reported by end users",
+                "Database connection pool exhaustion detected",
+                "Memory usage spike causing service degradation",
+                "API response time exceeding SLA thresholds",
+                "Authentication failures for subset of users",
+                "Payment processing queue backlog growing",
+                "SSL certificate validation errors in logs",
+                "Disk space critically low on production node",
+                "Cache invalidation causing stale data responses",
+                "Load balancer health check failures",
+                "Scheduled batch job exceeding time window",
+                "Rate limiting triggered unexpectedly",
+                "Configuration drift detected between environments",
+                "Third-party webhook delivery failures increasing",
+                "DNS resolution delays affecting service discovery",
+                "Thread deadlock detected in worker pool",
+                "Replication lag causing read inconsistency",
+                "Circuit breaker activating repeatedly",
+                "Garbage collection pauses exceeding 500ms"
+            ];
+
             for (let i = 1; i <= 50; i++) {
                 const priority = priorities[Math.floor(Math.random() * priorities.length)];
                 let severity = "Low";
-                if(priority === "P1") severity = "Critical";
-                else if(priority === "P2") severity = "High";
-                else if(priority === "P3") severity = "Medium";
+                if (priority === "P1") severity = "Critical";
+                else if (priority === "P2") severity = "High";
+                else if (priority === "P3") severity = "Medium";
 
-                incidents.push({
+                const system = systems[Math.floor(Math.random() * systems.length)];
+                const desc = descriptions[Math.floor(Math.random() * descriptions.length)];
+                const timeEstimate = Math.floor(Math.random() * 120) + 10;
+
+                data.push({
                     incidentid: 1000 + i,
-                    title: `Incident #${i} - ${systems[Math.floor(Math.random() * systems.length)]} Failure`,
-                    description: "Automated generated issue.",
-                    affected_system: systems[Math.floor(Math.random() * systems.length)],
+                    title: `Incident #${i} - ${system} Failure`,
+                    description: desc,
+                    affected_system: system,
                     impacted_scope: "Global",
                     reported_priority: priority,
                     severity_prediction: severity,
-                    time_estimate: Math.floor(Math.random() * 120) + 10,
+                    time_estimate: timeEstimate,
                     sla_deadline: 60,
                     error_logs: sampleLogs[Math.floor(Math.random() * sampleLogs.length)],
-                    timestamp: new Date(Date.now() - Math.floor(Math.random() * 1000000000)).toISOString()
+                    timestamp: new Date(Date.now() - Math.floor(Math.random() * 1000000000)).toISOString(),
+                    isTrainingData: true  // Flag to identify original 50 records
                 });
+            }
+            return data;
+        }
+
+        /**
+         * Load incidents from localStorage.
+         * If nothing is stored, generate the initial 50 mock records and save them.
+         */
+        function loadIncidents() {
+            try {
+                const stored = localStorage.getItem(STORAGE_KEY);
+                if (stored) {
+                    incidents = JSON.parse(stored);
+                    console.log(`Loaded ${incidents.length} records from localStorage.`);
+                } else {
+                    // First time: generate 50 training records and persist them
+                    incidents = generateMockData();
+                    saveIncidents();
+                    console.log(`Generated and saved ${incidents.length} initial training records.`);
+                }
+            } catch (e) {
+                console.error("Failed to load from localStorage, regenerating data:", e);
+                incidents = generateMockData();
+                saveIncidents();
             }
         }
 
-        // --- 2. AUTHENTICATION ---
+        /**
+         * Save current incidents array to localStorage.
+         */
+        function saveIncidents() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(incidents));
+                // Also save metadata
+                const meta = {
+                    totalRecords: incidents.length,
+                    trainingRecords: incidents.filter(i => i.isTrainingData).length,
+                    userRecords: incidents.filter(i => !i.isTrainingData).length,
+                    lastUpdated: new Date().toISOString()
+                };
+                localStorage.setItem(STORAGE_META_KEY, JSON.stringify(meta));
+                updateAllRecordCounts();
+            } catch (e) {
+                console.error("Failed to save to localStorage:", e);
+            }
+        }
+
+        /**
+         * Update all the record count indicators across the UI.
+         */
+        function updateAllRecordCounts() {
+            const total = incidents.length;
+            const training = incidents.filter(i => i.isTrainingData).length;
+            const userAdded = total - training;
+            const summaryText = userAdded > 0 
+                ? `${total} records (${training} training + ${userAdded} added)` 
+                : `${total} records`;
+            
+            const el1 = document.getElementById('record-count-status');
+            const el2 = document.getElementById('ops-record-count');
+            const el3 = document.getElementById('history-count');
+            const el4 = document.getElementById('ai-count');
+            const el5 = document.getElementById('report-count');
+
+            if (el1) el1.textContent = summaryText + ' — saved locally';
+            if (el2) el2.textContent = summaryText + ' in Knowledge Base';
+            if (el3) el3.textContent = summaryText;
+            if (el4) el4.textContent = summaryText + ' analyzed';
+            if (el5) el5.textContent = summaryText;
+        }
+
+        /**
+         * Reset all data back to the original 50 training records.
+         * Removes all user-added records permanently.
+         */
+        function showResetConfirm() {
+            document.getElementById('confirm-overlay').style.display = 'flex';
+        }
+        function closeConfirm() {
+            document.getElementById('confirm-overlay').style.display = 'none';
+        }
+        function confirmResetData() {
+            closeConfirm();
+            incidents = generateMockData();
+            saveIncidents();
+            showToast("Data reset to original 50 training records.");
+            // Re-render current page
+            const activePage = document.querySelector('.nav-link.active');
+            if (activePage) {
+                const pageId = activePage.getAttribute('onclick').match(/'([^']+)'/)[1];
+                switchPage(pageId, activePage);
+            }
+        }
+
+        // ============================================================
+        // 2. AUTHENTICATION
+        // ============================================================
         let authMode = 'login';
         function toggleAuthMode(mode) {
             authMode = mode;
@@ -466,7 +676,7 @@
             const originalText = document.getElementById('google-btn-text').innerText;
             btn.innerHTML = 'Connecting...'; btn.style.opacity = '0.7';
             setTimeout(() => {
-                let name = "Google User"; if(authMode === 'signup') name = document.getElementById('name').value || "New User";
+                let name = "Google User"; if (authMode === 'signup') name = document.getElementById('name').value || "New User";
                 enterApp(name, "Admin");
                 btn.innerHTML = `<svg viewBox="0 0 48 48" style="width:18px; height:18px; margin-right:12px;"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path></svg> ${originalText}`;
                 btn.style.opacity = '1';
@@ -479,7 +689,7 @@
             setTimeout(() => {
                 let displayName = "Pat Manager"; let role = "MANAGER";
                 if (authMode === 'signup') {
-                    if(!email || !pass) { alert("Please fill all fields"); btn.disabled = false; btn.innerText = "Sign Up"; return; }
+                    if (!email || !pass) { alert("Please fill all fields"); btn.disabled = false; btn.innerText = "Sign Up"; return; }
                     displayName = name || "New User"; role = "NEW USER"; showToast("Account created successfully!");
                 } else { if (email === 'admin@ops.com' && pass === 'admin') { displayName = "Pat Manager"; } else { displayName = email.split('@')[0]; role = "USER"; } }
                 enterApp(displayName, role); btn.disabled = false; btn.innerText = authMode === 'signup' ? "Sign Up" : "Sign In";
@@ -501,9 +711,12 @@
             document.getElementById('email').value = ""; document.getElementById('password').value = "";
         }
 
-        // --- 3. APP INITIALIZATION ---
+        // ============================================================
+        // 3. APP INITIALIZATION
+        // ============================================================
         function initApp() {
-            if (incidents.length === 0) generateMockData();
+            // Load data from localStorage (or generate initial 50)
+            loadIncidents();
             switchPage('dashboard', document.querySelector('.nav-link.active'));
             document.getElementById('date-display').innerText = new Date().toISOString().split('T')[0];
         }
@@ -512,16 +725,19 @@
             document.getElementById('page-' + pageId).style.display = 'block';
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             el.classList.add('active');
-            if(pageId === 'dashboard') updateDashboard();
-            if(pageId === 'history') renderFullTable(incidents);
-            if(pageId === 'ai-summaries') generateAISummaries();
-            if(pageId === 'reports') updateReports();
+            if (pageId === 'dashboard') updateDashboard();
+            if (pageId === 'history') renderFullTable(incidents);
+            if (pageId === 'ai-summaries') generateAISummaries();
+            if (pageId === 'reports') updateReports();
+            updateAllRecordCounts();
         }
 
-        // --- 4. AGENT INFERENCE & ANALYSIS LOGIC ---
+        // ============================================================
+        // 4. AGENT INFERENCE & ANALYSIS LOGIC (saves to localStorage)
+        // ============================================================
         function handleAgentSubmit() {
             const prompt = document.getElementById('ai-prompt').value;
-            if(!prompt) { alert("Please describe the incident."); return; }
+            if (!prompt) { alert("Please describe the incident."); return; }
 
             const overlay = document.getElementById('analyzing-overlay');
             const textEl = document.getElementById('analysis-text');
@@ -532,7 +748,7 @@
 
             // Simulate Thinking Steps
             setTimeout(() => { textEl.innerText = "Extracting Entities..."; subEl.innerText = "Detecting System, Priority, Scope"; }, 800);
-            setTimeout(() => { textEl.innerText = "Correlating with Knowledge Base..."; subEl.innerText = "Searching for similar patterns"; }, 1800);
+            setTimeout(() => { textEl.innerText = "Correlating with Knowledge Base..."; subEl.innerText = `Searching across ${incidents.length} records for similar patterns`; }, 1800);
             setTimeout(() => { textEl.innerText = "Generating Resolution Plan..."; subEl.innerText = "Calculating estimated time"; }, 2600);
 
             setTimeout(() => {
@@ -544,54 +760,87 @@
                 let steps = ["Check application logs.", "Verify server health.", "Restart affected service."];
 
                 // Priority Inference
-                if(text.includes('critical') || text.includes('down') || text.includes('crash') || text.includes('fatal')) { priority = "P1"; severity = "Critical"; sla = 15; estTime = 90; }
-                else if(text.includes('high') || text.includes('urgent') || text.includes('major')) { priority = "P2"; severity = "High"; sla = 60; estTime = 60; }
-                else if(text.includes('slow') || text.includes('latency') || text.includes('lag')) { priority = "P2"; severity = "High"; estTime = 45; }
-                else if(text.includes('minor') || text.includes('cosmetic')) { priority = "P5"; severity = "Low"; sla = 1000; estTime = 10; }
-                else { priority = "P3"; sla = 120; } // Default
+                if (text.includes('critical') || text.includes('down') || text.includes('crash') || text.includes('fatal')) {
+                    priority = "P1"; severity = "Critical"; sla = 15; estTime = 90;
+                } else if (text.includes('high') || text.includes('urgent') || text.includes('major')) {
+                    priority = "P2"; severity = "High"; sla = 60; estTime = 60;
+                } else if (text.includes('slow') || text.includes('latency') || text.includes('lag')) {
+                    priority = "P2"; severity = "High"; estTime = 45;
+                } else if (text.includes('minor') || text.includes('cosmetic')) {
+                    priority = "P5"; severity = "Low"; sla = 1000; estTime = 10;
+                } else {
+                    priority = "P3"; sla = 120;
+                }
 
                 // System Inference
-                if(text.includes('payment') || text.includes('checkout') || text.includes('stripe')) system = "Payment Gateway";
-                else if(text.includes('login') || text.includes('auth') || text.includes('password') || text.includes('sso')) system = "Auth Service";
-                else if(text.includes('database') || text.includes('db') || text.includes('sql') || text.includes('query')) system = "User Database";
-                else if(text.includes('ui') || text.includes('frontend') || text.includes('button') || text.includes('page')) system = "Frontend UI";
-                else if(text.includes('email') || text.includes('notification') || text.includes('mail')) system = "Email Server";
-                else if(text.includes('server') || text.includes('host') || text.includes('instance')) system = "Infrastructure";
+                if (text.includes('payment') || text.includes('checkout') || text.includes('stripe')) system = "Payment Gateway";
+                else if (text.includes('login') || text.includes('auth') || text.includes('password') || text.includes('sso')) system = "Auth Service";
+                else if (text.includes('database') || text.includes('db') || text.includes('sql') || text.includes('query')) system = "User Database";
+                else if (text.includes('ui') || text.includes('frontend') || text.includes('button') || text.includes('page')) system = "Frontend UI";
+                else if (text.includes('email') || text.includes('notification') || text.includes('mail')) system = "Email Server";
+                else if (text.includes('server') || text.includes('host') || text.includes('instance')) system = "Infrastructure";
 
                 // Scope Inference
-                if(text.includes('global') || text.includes('worldwide') || text.includes('everyone')) scope = "Global";
-                else if(text.includes('region') || text.includes('eu') || text.includes('us') || text.includes('asia')) scope = "Regional";
-                else if(text.includes('my') || text.includes('account') || text.includes('single')) scope = "Specific User";
+                if (text.includes('global') || text.includes('worldwide') || text.includes('everyone')) scope = "Global";
+                else if (text.includes('region') || text.includes('eu') || text.includes('us') || text.includes('asia')) scope = "Regional";
+                else if (text.includes('my') || text.includes('account') || text.includes('single')) scope = "Specific User";
                 else scope = "Internal";
 
                 // Resolution Logic based on Inferred Data
-                if(priority === "P1" || text.includes('down')) {
+                if (priority === "P1" || text.includes('down')) {
                     rootCause = `Service termination detected in ${system}.`;
-                    steps = [`SSH into ${system} production instances.`, "Check system resources (CPU/Memory) for OOM.", "Review recent error logs for stack traces.", `Attempt service restart: systemctl restart ${system.toLowerCase().replace(' ','-')}.`, "If unresolved, initiate rollback procedure."];
+                    steps = [
+                        `SSH into ${system} production instances.`,
+                        "Check system resources (CPU/Memory) for OOM.",
+                        "Review recent error logs for stack traces.",
+                        `Attempt service restart: systemctl restart ${system.toLowerCase().replace(/ /g, '-')}.`,
+                        "If unresolved, initiate rollback procedure."
+                    ];
                 } else if (text.includes('slow') || text.includes('latency')) {
                     rootCause = `Performance bottleneck detected in ${system}.`;
-                    steps = [`Enable slow query log on ${system}.`, "Analyze execution plan for unindexed queries.", "Check cache hit rates (Redis/Memcached).", "Restart caching layer if hit rate < 90%.", "Apply recommended database indexes."];
+                    steps = [
+                        `Enable slow query log on ${system}.`,
+                        "Analyze execution plan for unindexed queries.",
+                        "Check cache hit rates (Redis/Memcached).",
+                        "Restart caching layer if hit rate < 90%.",
+                        "Apply recommended database indexes."
+                    ];
                 } else if (system === "Auth Service") {
                     rootCause = "Authentication token validation failure.";
-                    steps = ["Verify SSO Provider (Okta/Auth0) status.", "Check JWT expiration settings.", "Restart Identity Provider sync service.", "Clear local cookies and re-authenticate."];
+                    steps = [
+                        "Verify SSO Provider (Okta/Auth0) status.",
+                        "Check JWT expiration settings.",
+                        "Restart Identity Provider sync service.",
+                        "Clear local cookies and re-authenticate."
+                    ];
                 }
 
-                // --- SAVE & UPDATE UI ---
-                const newRecord = {
-                    incidentid: 1000 + incidents.length + 1, 
-                    title: prompt.substring(0, 50) + "...", 
-                    description: prompt, 
-                    affected_system: system,
-                    impacted_scope: scope, 
-                    reported_priority: priority, 
-                    severity_prediction: severity,
-                    time_estimate: estTime, 
-                    sla_deadline: sla, 
-                    error_logs: "Analyzed from prompt", 
-                    timestamp: new Date().toISOString()
-                };
-                incidents.push(newRecord);
+                // --- GENERATE UNIQUE ID (max existing id + 1) ---
+                const maxId = incidents.reduce((max, inc) => Math.max(max, inc.incidentid), 0);
+                const newId = maxId + 1;
 
+                // --- CREATE NEW RECORD ---
+                const newRecord = {
+                    incidentid: newId,
+                    title: prompt.length > 50 ? prompt.substring(0, 50) + "..." : prompt,
+                    description: prompt,
+                    affected_system: system,
+                    impacted_scope: scope,
+                    reported_priority: priority,
+                    severity_prediction: severity,
+                    time_estimate: estTime,
+                    sla_deadline: sla,
+                    error_logs: "Analyzed from user prompt",
+                    timestamp: new Date().toISOString(),
+                    isTrainingData: false  // This is a user-added record
+                };
+
+                // --- ADD & PERSIST TO LOCALSTORAGE ---
+                incidents.push(newRecord);
+                saveIncidents();
+                console.log(`New incident INC${newId} saved. Total records: ${incidents.length}`);
+
+                // --- UPDATE UI ---
                 overlay.style.display = 'none';
                 document.getElementById('resolution-report').style.display = 'block';
                 
@@ -603,35 +852,42 @@
                 document.getElementById('res-time').innerText = estTime + " mins";
                 document.getElementById('res-severity').innerText = severity;
                 document.getElementById('res-cause').innerText = rootCause;
-                document.getElementById('new-id').innerText = newRecord.incidentid;
+                document.getElementById('new-id').innerText = newId;
 
                 const stepsList = document.getElementById('res-steps-list');
                 stepsList.innerHTML = '';
                 steps.forEach(step => {
                     const li = document.createElement('li'); li.innerText = step; stepsList.appendChild(li);
                 });
-                showToast("Agent Analysis Complete.");
+
+                // Clear the textarea for next input
+                document.getElementById('ai-prompt').value = '';
+
+                showToast(`Incident INC${newId} saved permanently. (${incidents.length} total records)`);
+                updateAllRecordCounts();
             }, 3200);
         }
 
-        // --- 5. DASHBOARD & TABLES ---
+        // ============================================================
+        // 5. DASHBOARD & TABLES
+        // ============================================================
         let charts = {};
         function updateDashboard() {
             document.getElementById('metric-total').innerText = incidents.length;
             document.getElementById('metric-p1').innerText = incidents.filter(i => i.reported_priority === 'P1').length;
             document.getElementById('metric-breach').innerText = incidents.filter(i => i.time_estimate > i.sla_deadline).length;
-            const avgTime = Math.round(incidents.reduce((a,b) => a + b.time_estimate, 0) / incidents.length);
+            const avgTime = incidents.length > 0 ? Math.round(incidents.reduce((a, b) => a + b.time_estimate, 0) / incidents.length) : 0;
             document.getElementById('metric-avg').innerText = avgTime + "m";
 
             const ctxTrend = document.getElementById('trendChart').getContext('2d');
-            if(charts.trend) charts.trend.destroy();
+            if (charts.trend) charts.trend.destroy();
             charts.trend = new Chart(ctxTrend, {
                 type: 'line', data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [{ label: 'Incidents', data: [5, 12, 8, 15, 6, 4, incidents.length % 20], borderColor: '#6366f1', tension: 0.4, fill: true, backgroundColor: 'rgba(99, 102, 241, 0.1)' }] }, options: { responsive: true, maintainAspectRatio: false }
             });
 
             const pCounts = {}; incidents.forEach(i => pCounts[i.reported_priority] = (pCounts[i.reported_priority] || 0) + 1);
             const ctxPrio = document.getElementById('priorityChart').getContext('2d');
-            if(charts.prio) charts.prio.destroy();
+            if (charts.prio) charts.prio.destroy();
             charts.prio = new Chart(ctxPrio, {
                 type: 'bar', data: { labels: Object.keys(pCounts), datasets: [{ label: 'Count', data: Object.values(pCounts), backgroundColor: '#6366f1' }] }, options: { responsive: true, maintainAspectRatio: false }
             });
@@ -639,36 +895,85 @@
 
         function renderFullTable(data) {
             const tbody = document.querySelector('#fullTable tbody'); tbody.innerHTML = '';
-            data.slice().reverse().slice(0, 50).forEach(i => {
+            // Show all records (most recent first)
+            data.slice().reverse().forEach(i => {
+                const isUserAdded = !i.isTrainingData;
                 const tr = document.createElement('tr');
-                tr.innerHTML = `<td>INC${i.incidentid}</td><td title="${i.description}">${i.title}</td><td>${i.affected_system}</td><td>${i.impacted_scope}</td><td><span class="badge badge-${i.reported_priority}">${i.reported_priority}</span></td><td><span class="badge badge-${i.severity_prediction}">${i.severity_prediction}</span></td><td>${i.time_estimate}</td><td>${i.timestamp.split('T')[0]}</td>`;
+                if (isUserAdded) tr.style.background = '#fefce8'; // Highlight user-added rows
+                tr.innerHTML = `
+                    <td>INC${i.incidentid}</td>
+                    <td title="${i.description}">${i.title}</td>
+                    <td>${i.affected_system}</td>
+                    <td>${i.impacted_scope}</td>
+                    <td><span class="badge badge-${i.reported_priority}">${i.reported_priority}</span></td>
+                    <td><span class="badge badge-${i.severity_prediction}">${i.severity_prediction}</span></td>
+                    <td>${i.time_estimate}</td>
+                    <td>${i.timestamp.split('T')[0]}</td>
+                `;
                 tbody.appendChild(tr);
             });
         }
         function filterTable(query) {
             const lower = query.toLowerCase();
-            const filtered = incidents.filter(i => i.title.toLowerCase().includes(lower) || i.affected_system.toLowerCase().includes(lower));
+            const filtered = incidents.filter(i =>
+                i.title.toLowerCase().includes(lower) ||
+                i.affected_system.toLowerCase().includes(lower) ||
+                (`INC${i.incidentid}`).toLowerCase().includes(lower)
+            );
             renderFullTable(filtered);
         }
         function generateAISummaries() {
             const container = document.getElementById('ai-content');
             const total = incidents.length;
             const criticals = incidents.filter(i => i.severity_prediction === 'Critical').length;
-            const topSystem = incidents.sort((a,b) => incidents.filter(v => v.affected_system === b.affected_system).length - incidents.filter(v => v.affected_system === a.affected_system).length)[0]?.affected_system || "Unknown";
-            container.innerHTML = `<div class="ai-summary-box"><div class="ai-summary-title">🤖 Operational Health</div><p>Total Incidents: <strong>${total}</strong>. Critical: <strong>${criticals}</strong>. Top System: <strong>${topSystem}</strong>.</p></div>`;
+            const trainingCount = incidents.filter(i => i.isTrainingData).length;
+            const userCount = total - trainingCount;
+            const topSystem = getTopSystem();
+            const avgRes = total > 0 ? Math.round(incidents.reduce((a, b) => a + b.time_estimate, 0) / total) : 0;
+
+            container.innerHTML = `
+                <div class="ai-summary-box">
+                    <div class="ai-summary-title">🤖 Operational Health Overview</div>
+                    <p>Total Incidents: <strong>${total}</strong> (${trainingCount} training + ${userCount} user-added). 
+                    Critical: <strong>${criticals}</strong>. Most Affected System: <strong>${topSystem}</strong>. 
+                    Average Resolution Time: <strong>${avgRes} minutes</strong>.</p>
+                </div>
+                ${userCount > 0 ? `
+                <div class="ai-summary-box" style="border-left-color: #f59e0b;">
+                    <div class="ai-summary-title" style="color: #d97706;">📝 Recently Added by You</div>
+                    <p>You have manually added <strong>${userCount}</strong> incident${userCount > 1 ? 's' : ''} via the AI Agent. 
+                    These are highlighted in yellow on the Data History page. All records are persisted in your browser's local storage and survive page refreshes.</p>
+                </div>` : ''}
+                <div class="ai-summary-box" style="border-left-color: #10b981;">
+                    <div class="ai-summary-title" style="color: #059669;">💾 Data Persistence</div>
+                    <p>Your data is stored locally in your browser using localStorage. The original 50 training records are always preserved. 
+                    Any new incidents you add are appended and persist across browser sessions. 
+                    Use the "Reset Data" button on the Data History page to restore the original 50 records.</p>
+                </div>
+            `;
+        }
+
+        function getTopSystem() {
+            const counts = {};
+            incidents.forEach(i => counts[i.affected_system] = (counts[i.affected_system] || 0) + 1);
+            let top = "Unknown"; let max = 0;
+            for (const [sys, count] of Object.entries(counts)) {
+                if (count > max) { max = count; top = sys; }
+            }
+            return top;
         }
 
         function updateReports() {
             const sysCounts = {}; incidents.forEach(i => sysCounts[i.affected_system] = (sysCounts[i.affected_system] || 0) + 1);
             const ctxSys = document.getElementById('reportSystemChart').getContext('2d');
-            if(charts.sys) charts.sys.destroy();
+            if (charts.sys) charts.sys.destroy();
             charts.sys = new Chart(ctxSys, { 
-                type: 'doughnut', data: { labels: Object.keys(sysCounts), datasets: [{ data: Object.values(sysCounts), backgroundColor: ['#6366f1', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#818cf8'] }] }, options: { responsive: true, maintainAspectRatio: false } 
+                type: 'doughnut', data: { labels: Object.keys(sysCounts), datasets: [{ data: Object.values(sysCounts), backgroundColor: ['#6366f1', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#818cf8', '#4f46e5'] }] }, options: { responsive: true, maintainAspectRatio: false } 
             });
             const sevCounts = { "Critical": 0, "High": 0, "Medium": 0, "Low": 0 };
             incidents.forEach(i => sevCounts[i.severity_prediction]++);
             const ctxSev = document.getElementById('reportSevChart').getContext('2d');
-            if(charts.sev) charts.sev.destroy();
+            if (charts.sev) charts.sev.destroy();
             charts.sev = new Chart(ctxSev, { 
                 type: 'pie', data: { labels: Object.keys(sevCounts), datasets: [{ data: Object.values(sevCounts), backgroundColor: ['#ef4444', '#f97316', '#f59e0b', '#10b981'] }] }, options: { responsive: true, maintainAspectRatio: false } 
             });
@@ -680,6 +985,16 @@
             t.classList.add('show');
             setTimeout(() => t.classList.remove('show'), 3000);
         }
+
+        // ============================================================
+        // 6. AUTO-LOAD DATA ON PAGE LOAD
+        // ============================================================
+        // Pre-load data so it's ready before login
+        // (Actual initialization happens in initApp after login)
+        window.addEventListener('beforeunload', () => {
+            // Final save before leaving page
+            saveIncidents();
+        });
     </script>
 </body>
 </html>
